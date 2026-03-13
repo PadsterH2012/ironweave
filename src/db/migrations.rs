@@ -214,6 +214,27 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_attachments_issue ON attachments(issue_id);
     ")?;
 
+    // ── Merge Queue (orchestrator-driven) ──────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS merge_queue (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            branch_name TEXT NOT NULL,
+            agent_session_id TEXT,
+            issue_id TEXT,
+            team_id TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            conflict_files TEXT DEFAULT '[]',
+            resolver_agent_id TEXT,
+            error_message TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_merge_queue_project ON merge_queue(project_id);
+        CREATE INDEX IF NOT EXISTS idx_merge_queue_mq_status ON merge_queue(status);
+    ")?;
+
     // ── Activity Log ─────────────────────────────────────────────────
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS activity_log (

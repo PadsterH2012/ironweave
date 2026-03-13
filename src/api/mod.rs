@@ -12,3 +12,4 @@ pub mod sync;
 pub mod attachments;
 pub mod project_apps;
 pub mod plan_import;
+pub mod merge_queue;

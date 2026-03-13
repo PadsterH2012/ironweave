@@ -11,3 +11,4 @@ pub mod proxy_config;
 pub mod attachment;
 pub mod project_app;
 pub mod activity_log;
+pub mod merge_queue_entry;
