@@ -34,12 +34,7 @@
       metricsData = metrics;
       healthData = system;
 
-      if (agentIds.length > 0) {
-        const sessions = await Promise.all(agentIds.map((id) => agents.get(id)));
-        agentSessions = sessions;
-      } else {
-        agentSessions = [];
-      }
+      agentSessions = agentIds;
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to fetch dashboard data';
