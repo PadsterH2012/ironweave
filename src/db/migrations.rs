@@ -214,6 +214,25 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_attachments_issue ON attachments(issue_id);
     ")?;
 
+    // ── Activity Log ─────────────────────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            project_id TEXT,
+            team_id TEXT,
+            agent_id TEXT,
+            issue_id TEXT,
+            workflow_instance_id TEXT,
+            message TEXT NOT NULL,
+            metadata TEXT DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log(created_at);
+        CREATE INDEX IF NOT EXISTS idx_activity_log_project ON activity_log(project_id);
+        CREATE INDEX IF NOT EXISTS idx_activity_log_type ON activity_log(event_type);
+    ")?;
+
     // ── Project App Preview ──────────────────────────────────────────
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS project_apps (
