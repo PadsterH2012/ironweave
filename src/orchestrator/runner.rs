@@ -562,13 +562,65 @@ impl OrchestratorRunner {
             tracing::warn!(workflow = %instance_id, stage = %stage_id, "Stage failed");
         }
 
-        // 4. Spawn agents for newly ready stages
-        //    We need to split the borrow: extract process_manager and db refs
-        //    before getting the mutable run_state reference for spawning.
-        if !completed_stages.is_empty() {
-            // Re-borrow run_state after the previous mutable borrow scope ended
+        // 4. Check for gate approvals from the database
+        {
             let run_state = self.active_workflows.get_mut(instance_id).unwrap();
-            let ready = run_state.execution.ready_stages();
+            let pending_gates = run_state.execution.has_pending_approvals();
+            for gate_id in &pending_gates {
+                let approved = {
+                    let conn = self.db.lock().unwrap();
+                    let exists: bool = conn.query_row(
+                        "SELECT COUNT(*) > 0 FROM workflow_gate_approvals WHERE instance_id = ?1 AND stage_id = ?2",
+                        rusqlite::params![instance_id, gate_id],
+                        |row| row.get(0),
+                    ).unwrap_or(false);
+                    if exists {
+                        // Delete the approval row so it's not processed again
+                        let _ = conn.execute(
+                            "DELETE FROM workflow_gate_approvals WHERE instance_id = ?1 AND stage_id = ?2",
+                            rusqlite::params![instance_id, gate_id],
+                        );
+                    }
+                    exists
+                };
+                if approved {
+                    if let Err(e) = run_state.execution.approve_gate(gate_id) {
+                        tracing::error!(workflow = %instance_id, stage = %gate_id, "Failed to approve gate: {}", e);
+                    } else {
+                        // Gate approval moves to Running; mark as Completed since gates
+                        // don't need agent execution — they're just approval checkpoints.
+                        run_state.execution.update_stage(gate_id, StageStatus::Completed);
+                        tracing::info!(workflow = %instance_id, stage = %gate_id, "Gate approved and completed");
+                    }
+                }
+            }
+        }
+
+        // 5. Spawn agents for newly ready stages
+        //    Collect ready stages and project_id first to avoid borrow conflicts.
+        let ready_info: Option<(Vec<String>, String)> = {
+            let rs = self.active_workflows.get(instance_id).unwrap();
+            let ready = rs.execution.ready_stages();
+            if ready.is_empty() {
+                None
+            } else {
+                Some((ready, rs.project_id.clone()))
+            }
+        };
+
+        if let Some((ready, project_id)) = ready_info {
+            // Log stage starts before mutable borrow
+            for stage_id in &ready {
+                self.log_activity(
+                    "stage_started",
+                    &format!("Stage '{}' started", stage_id),
+                    Some(&project_id),
+                    None, None, None,
+                    Some(instance_id),
+                );
+            }
+
+            let run_state = self.active_workflows.get_mut(instance_id).unwrap();
             let db = &self.db;
             let pm = &self.process_manager;
             for stage_id in ready {
@@ -581,18 +633,34 @@ impl OrchestratorRunner {
             }
         }
 
-        // 5. Check workflow completion
-        let run_state = match self.active_workflows.get_mut(instance_id) {
-            Some(rs) => rs,
-            None => return Ok(()),
+        // 6. Check workflow completion
+        let completion_info: Option<(bool, String)> = {
+            let rs = match self.active_workflows.get(instance_id) {
+                Some(rs) => rs,
+                None => return Ok(()),
+            };
+            if rs.execution.is_complete() {
+                let all_succeeded = rs
+                    .execution
+                    .stage_statuses
+                    .values()
+                    .all(|s| matches!(s, StageStatus::Completed));
+                Some((all_succeeded, rs.project_id.clone()))
+            } else {
+                None
+            }
         };
 
-        if run_state.execution.is_complete() {
-            let all_succeeded = run_state
-                .execution
-                .stage_statuses
-                .values()
-                .all(|s| matches!(s, StageStatus::Completed));
+        if let Some((all_succeeded, project_id)) = completion_info {
+            let state_label = if all_succeeded { "completed" } else { "failed" };
+            self.log_activity(
+                &format!("workflow_{}", state_label),
+                &format!("Workflow {}", state_label),
+                Some(&project_id),
+                None, None, None,
+                Some(instance_id),
+            );
+            let run_state = self.active_workflows.get_mut(instance_id).unwrap();
             let new_state = if all_succeeded {
                 WorkflowState::Completed
             } else {
@@ -604,7 +672,11 @@ impl OrchestratorRunner {
             tracing::info!(workflow = %instance_id, "Workflow finished");
         }
 
-        // 6. Checkpoint
+        // 7. Checkpoint
+        let run_state = match self.active_workflows.get_mut(instance_id) {
+            Some(rs) => rs,
+            None => return Ok(()),
+        };
         let checkpoint = serde_json::to_value(&run_state.execution)?;
         run_state.state_machine.checkpoint(checkpoint)?;
 

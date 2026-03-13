@@ -1,4 +1,5 @@
 use axum::{extract::{Path, State}, Json, http::StatusCode};
+use rusqlite;
 use crate::state::AppState;
 use crate::models::workflow::{
     WorkflowDefinition, CreateWorkflowDefinition,
@@ -62,4 +63,16 @@ pub async fn list_instances(
 ) -> Json<Vec<WorkflowInstance>> {
     let conn = state.db.lock().unwrap();
     Json(WorkflowInstance::list_by_definition(&conn, &wid).unwrap_or_default())
+}
+
+pub async fn approve_gate(
+    State(state): State<AppState>,
+    Path((_wid, instance_id, stage_id)): Path<(String, String, String)>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let conn = state.db.lock().unwrap();
+    conn.execute(
+        "INSERT OR REPLACE INTO workflow_gate_approvals (instance_id, stage_id, approved_at) VALUES (?1, ?2, datetime('now'))",
+        rusqlite::params![instance_id, stage_id],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(StatusCode::OK)
 }

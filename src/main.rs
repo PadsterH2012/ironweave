@@ -164,6 +164,7 @@ async fn main() {
         .route("/api/projects/{pid}/workflows", get(api::workflows::list_definitions).post(api::workflows::create_definition))
         .route("/api/projects/{pid}/workflows/{id}", get(api::workflows::get_definition))
         .route("/api/workflows/{wid}/instances", get(api::workflows::list_instances).post(api::workflows::create_instance))
+        .route("/api/workflows/{wid}/instances/{iid}/stages/{sid}/approve", post(api::workflows::approve_gate))
         // Dashboard
         .route("/api/dashboard", get(api::dashboard::stats))
         .route("/api/dashboard/activity", get(api::dashboard::activity))

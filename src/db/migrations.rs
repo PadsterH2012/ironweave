@@ -275,6 +275,16 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     // Add app_url to projects
     let _ = conn.execute("ALTER TABLE projects ADD COLUMN app_url TEXT", []);
 
+    // ── Workflow Gate Approvals ──────────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS workflow_gate_approvals (
+            instance_id TEXT NOT NULL,
+            stage_id TEXT NOT NULL,
+            approved_at TEXT NOT NULL,
+            PRIMARY KEY (instance_id, stage_id)
+        );
+    ")?;
+
     Ok(())
 }
 
