@@ -1378,97 +1378,150 @@ impl OrchestratorRunner {
         Ok(())
     }
 
-    // ── sweep_merge_queue (Task 8 – merge queue processing) ──────
+    // ── sweep_merge_queue (merge queue processing) ─────────────────
 
     async fn sweep_merge_queue(&mut self) -> crate::error::Result<()> {
+        use crate::models::merge_queue_entry::MergeQueueEntry;
         use crate::worktree::merge_queue::{MergeQueueProcessor, MergeResult};
 
-        let entries: Vec<(String, String, String, String, String, String)> = {
+        // Step 1: Find distinct project_ids with pending entries (lock briefly)
+        let project_ids: Vec<String> = {
             let conn = self.db.lock().unwrap();
             let mut stmt = conn.prepare(
-                "SELECT id, project_id, agent_session_id, branch, worktree_path, target_branch \
-                 FROM merge_queue_entries WHERE status = 'queued' \
-                 ORDER BY queued_at ASC"
+                "SELECT DISTINCT project_id FROM merge_queue WHERE status = 'pending'"
             )?;
-            stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            })?.filter_map(|r| r.ok()).collect()
+            stmt.query_map([], |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .collect()
         };
 
-        let mut processed_projects = std::collections::HashSet::new();
-
-        for (entry_id, project_id, _session_id, branch, _worktree_path, target_branch) in &entries {
-            if processed_projects.contains(project_id) {
-                continue;
-            }
-            processed_projects.insert(project_id.clone());
-
-            // Update status to merging
-            {
+        for project_id in &project_ids {
+            // Step 2: Get next pending entry and project directory (lock briefly)
+            let (entry, project_dir) = {
                 let conn = self.db.lock().unwrap();
-                let _ = conn.execute(
-                    "UPDATE merge_queue_entries SET status = 'merging' WHERE id = ?1",
-                    rusqlite::params![entry_id],
-                );
-            }
-
-            let project_dir = {
-                let conn = self.db.lock().unwrap();
-                Project::get_by_id(&conn, project_id)
-                    .map(|p| p.directory)
-                    .unwrap_or_default()
+                let entry = match MergeQueueEntry::next_pending(&conn, project_id) {
+                    Ok(e) => e,
+                    Err(_) => continue, // No pending entries (race condition)
+                };
+                let project_dir = match Project::get_by_id(&conn, project_id) {
+                    Ok(p) => p.directory,
+                    Err(_) => continue,
+                };
+                (entry, project_dir)
             };
+            // DB lock is dropped here before file I/O
 
             if project_dir.is_empty() {
                 continue;
             }
 
+            let repo_path = std::path::Path::new(&project_dir);
+
+            // Step 4: Detect the default branch (target)
+            let target_branch = WorktreeManager::detect_default_branch(repo_path)
+                .unwrap_or_else(|| "main".to_string());
+
+            // Step 5: Attempt the merge (file I/O — no DB lock held)
             let result = MergeQueueProcessor::try_merge(
-                std::path::Path::new(&project_dir),
-                branch,
+                repo_path,
+                &entry.branch_name,
                 &target_branch,
             );
 
-            let conn = self.db.lock().unwrap();
+            // Step 6: Handle result (re-acquire DB lock)
             match result {
                 Ok(MergeResult::Success) => {
-                    let _ = conn.execute(
-                        "UPDATE merge_queue_entries SET status = 'merged', merged_at = datetime('now') WHERE id = ?1",
-                        rusqlite::params![entry_id],
+                    {
+                        let conn = self.db.lock().unwrap();
+                        let _ = MergeQueueEntry::update_status(
+                            &conn, &entry.id, "merged", None, None, None,
+                        );
+                    }
+                    self.log_activity(
+                        "merge_success",
+                        &format!("Merged branch '{}' into '{}'", entry.branch_name, target_branch),
+                        Some(project_id), entry.team_id.as_deref(),
+                        entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
+                        None,
                     );
                     let _ = self.worktree_manager.remove_worktree(
-                        std::path::Path::new(&project_dir),
-                        &branch.replace('/', "-"),
+                        repo_path,
+                        &entry.branch_name.replace('/', "-"),
                     );
-                    tracing::info!(branch = %branch, "Merge successful");
+                    tracing::info!(branch = %entry.branch_name, "Merge successful");
                 }
                 Ok(MergeResult::Conflict { files }) => {
-                    let _ = conn.execute(
-                        "UPDATE merge_queue_entries SET status = 'conflict', conflict_tier = 1 WHERE id = ?1",
-                        rusqlite::params![entry_id],
+                    let conflict_json = serde_json::to_string(&files).unwrap_or_else(|_| "[]".to_string());
+                    let file_list = files.iter()
+                        .map(|f| format!("- {}", f))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+
+                    {
+                        let conn = self.db.lock().unwrap();
+                        let _ = MergeQueueEntry::update_status(
+                            &conn, &entry.id, "conflicted", Some(&conflict_json), None, None,
+                        );
+                        // Create a resolver issue for the conflict
+                        let _ = Issue::create(&conn, &CreateIssue {
+                            project_id: project_id.clone(),
+                            issue_type: Some("merge_conflict".to_string()),
+                            title: format!("Resolve merge conflicts: {}", entry.branch_name),
+                            description: Some(format!(
+                                "Resolve merge conflicts in branch '{}'. Conflicting files:\n{}",
+                                entry.branch_name, file_list,
+                            )),
+                            priority: Some(10),
+                            depends_on: None,
+                            workflow_instance_id: None,
+                            stage_id: None,
+                            role: Some("senior_coder".to_string()),
+                            parent_id: None,
+                            needs_intake: Some(0),
+                            scope_mode: None,
+                        });
+                    }
+                    self.log_activity(
+                        "merge_conflict",
+                        &format!("Merge conflict on branch '{}': {} file(s)", entry.branch_name, files.len()),
+                        Some(project_id), entry.team_id.as_deref(),
+                        entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
+                        None,
                     );
-                    tracing::warn!(branch = %branch, conflicts = ?files, "Merge conflict");
+                    tracing::warn!(branch = %entry.branch_name, conflicts = ?files, "Merge conflict");
                 }
                 Ok(MergeResult::Error(msg)) => {
-                    let _ = conn.execute(
-                        "UPDATE merge_queue_entries SET status = 'failed' WHERE id = ?1",
-                        rusqlite::params![entry_id],
+                    {
+                        let conn = self.db.lock().unwrap();
+                        let _ = MergeQueueEntry::update_status(
+                            &conn, &entry.id, "failed", None, None, Some(&msg),
+                        );
+                    }
+                    self.log_activity(
+                        "merge_failed",
+                        &format!("Merge failed for branch '{}': {}", entry.branch_name, msg),
+                        Some(project_id), entry.team_id.as_deref(),
+                        entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
+                        None,
                     );
-                    tracing::error!(branch = %branch, "Merge failed: {}", msg);
+                    tracing::error!(branch = %entry.branch_name, "Merge failed: {}", msg);
                 }
                 Err(e) => {
-                    let _ = conn.execute(
-                        "UPDATE merge_queue_entries SET status = 'failed' WHERE id = ?1",
-                        rusqlite::params![entry_id],
+                    let err_msg = e.to_string();
+                    {
+                        let conn = self.db.lock().unwrap();
+                        let _ = MergeQueueEntry::update_status(
+                            &conn, &entry.id, "failed", None, None, Some(&err_msg),
+                        );
+                    }
+                    self.log_activity(
+                        "merge_failed",
+                        &format!("Merge error for branch '{}': {}", entry.branch_name, err_msg),
+                        Some(project_id), entry.team_id.as_deref(),
+                        entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
+                        None,
                     );
-                    tracing::error!(branch = %branch, "Merge error: {}", e);
+                    tracing::error!(branch = %entry.branch_name, "Merge error: {}", e);
                 }
             }
         }
