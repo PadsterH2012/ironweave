@@ -52,6 +52,27 @@ impl ProcessManager {
 
         let writer = spawned.master.take_writer().ok();
 
+        // Start background log writer — tee PTY output to data/agent-logs/{session_id}.log
+        if let Ok(reader) = spawned.master.try_clone_reader() {
+            let log_dir = std::path::PathBuf::from("data/agent-logs");
+            let _ = std::fs::create_dir_all(&log_dir);
+            let log_path = log_dir.join(format!("{}.log", session_id));
+            tokio::task::spawn_blocking(move || {
+                use std::io::Read;
+                let mut reader = reader;
+                let mut buf = [0u8; 4096];
+                if let Ok(mut file) = std::fs::File::create(&log_path) {
+                    loop {
+                        match reader.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(n) => { let _ = std::io::Write::write_all(&mut file, &buf[..n]); }
+                            Err(_) => break,
+                        }
+                    }
+                }
+            });
+        }
+
         let managed = ManagedAgent {
             session_id: session_id.to_string(),
             runtime: runtime_name.to_string(),

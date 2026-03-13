@@ -194,10 +194,20 @@
               <p class="text-xs text-gray-400">{agent.role}</p>
             {/if}
 
-            <!-- State -->
-            <div class="flex items-center gap-2">
-              <span class="inline-block h-2.5 w-2.5 rounded-full {stateColor(agent.state)}"></span>
-              <span class="text-sm text-gray-300 capitalize">{agent.state}</span>
+            <!-- Claimed issue -->
+            {#if agent.claimed_issue}
+              <p class="text-xs text-purple-300 truncate" title={agent.claimed_issue}>{agent.claimed_issue}</p>
+            {/if}
+
+            <!-- State + last activity -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="inline-block h-2.5 w-2.5 rounded-full {stateColor(agent.state)}"></span>
+                <span class="text-sm text-gray-300 capitalize">{agent.state}</span>
+              </div>
+              {#if agent.last_heartbeat}
+                <span class="text-xs text-gray-500">{timeAgo(agent.last_heartbeat)}</span>
+              {/if}
             </div>
           </div>
         {/each}

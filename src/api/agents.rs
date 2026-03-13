@@ -28,6 +28,10 @@ pub struct AgentInfo {
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claimed_issue: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_heartbeat: Option<String>,
 }
 
 pub async fn spawn(
@@ -68,6 +72,8 @@ pub async fn spawn(
         runtime: input.runtime,
         state: "running".to_string(),
         role: None,
+        claimed_issue: None,
+        last_heartbeat: None,
     };
 
     Ok((StatusCode::CREATED, Json(info)))
@@ -79,18 +85,25 @@ pub async fn list(State(state): State<AppState>) -> Json<Vec<AgentInfo>> {
     let infos: Vec<AgentInfo> = active
         .into_iter()
         .map(|(id, runtime)| {
-            let role = conn.query_row(
-                "SELECT tas.role FROM agent_sessions a \
+            let (role, claimed_issue, last_heartbeat) = conn.query_row(
+                "SELECT tas.role, i.title, a.last_heartbeat FROM agent_sessions a \
                  JOIN team_agent_slots tas ON a.slot_id = tas.id \
+                 LEFT JOIN issues i ON a.claimed_task_id = i.id \
                  WHERE a.id = ?1",
                 rusqlite::params![&id],
-                |row| row.get::<_, String>(0),
-            ).ok();
+                |row| Ok((
+                    row.get::<_, String>(0).ok(),
+                    row.get::<_, String>(1).ok(),
+                    row.get::<_, String>(2).ok(),
+                )),
+            ).unwrap_or((None, None, None));
             AgentInfo {
                 id,
                 runtime,
                 state: "running".to_string(),
                 role,
+                claimed_issue,
+                last_heartbeat,
             }
         })
         .collect();
@@ -108,21 +121,28 @@ pub async fn get_agent(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let locked = agent.lock().await;
-    let role = {
+    let (role, claimed_issue, last_heartbeat) = {
         let conn = state.db.lock().unwrap();
         conn.query_row(
-            "SELECT tas.role FROM agent_sessions a \
+            "SELECT tas.role, i.title, a.last_heartbeat FROM agent_sessions a \
              JOIN team_agent_slots tas ON a.slot_id = tas.id \
+             LEFT JOIN issues i ON a.claimed_task_id = i.id \
              WHERE a.id = ?1",
             rusqlite::params![&id],
-            |row| row.get::<_, String>(0),
-        ).ok()
+            |row| Ok((
+                row.get::<_, String>(0).ok(),
+                row.get::<_, String>(1).ok(),
+                row.get::<_, String>(2).ok(),
+            )),
+        ).unwrap_or((None, None, None))
     };
     let info = AgentInfo {
         id: locked.session_id.clone(),
         runtime: locked.runtime.clone(),
         state: "running".to_string(),
         role,
+        claimed_issue,
+        last_heartbeat,
     };
     Ok(Json(info))
 }

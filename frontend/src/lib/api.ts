@@ -243,6 +243,8 @@ export interface AgentInfo {
   runtime: string;
   state: string;
   role?: string;
+  claimed_issue?: string;
+  last_heartbeat?: string;
 }
 
 export interface SpawnAgentRequest {
