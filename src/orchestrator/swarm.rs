@@ -316,6 +316,7 @@ mod tests {
                 model: None,
                 config: None,
                 slot_order: None,
+                is_lead: None,
             },
         )
         .unwrap();
@@ -363,6 +364,7 @@ mod tests {
                 model: None,
                 config: None,
                 slot_order: None,
+                is_lead: None,
             },
         )
         .unwrap();

@@ -83,8 +83,10 @@ fn make_agent_session(conn: &Connection, project: &Project) -> AgentSession {
             team_id: team.id.clone(),
             role: "coder".to_string(),
             runtime: "claude".to_string(),
+            model: None,
             config: None,
             slot_order: None,
+            is_lead: None,
         },
     )
     .unwrap();

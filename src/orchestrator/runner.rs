@@ -787,47 +787,291 @@ impl OrchestratorRunner {
             }
             let pickup_refs: Vec<&str> = pickup_types.iter().map(|s| s.as_str()).collect();
 
-            // Group slots by role and count how many agents are already running per role
-            let mut slots_by_role: HashMap<String, Vec<TeamAgentSlot>> = HashMap::new();
-            for slot in slots {
-                slots_by_role
-                    .entry(slot.role.clone())
-                    .or_default()
-                    .push(slot);
+            match team.coordination_mode.as_str() {
+                "pipeline" => {
+                    self.dispatch_pipeline(team, &slots, &pickup_refs).await?;
+                }
+                "collaborative" => {
+                    self.dispatch_collaborative(team, &slots, &pickup_refs).await?;
+                }
+                "hierarchical" => {
+                    self.dispatch_hierarchical(team, &slots, &pickup_refs).await?;
+                }
+                _ => {
+                    // "swarm" and any unknown mode: all slots claim freely from the ready pool
+                    self.dispatch_swarm(team, &slots, &pickup_refs).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Swarm dispatch: all slots can claim from the ready pool freely (original behaviour).
+    async fn dispatch_swarm(
+        &mut self,
+        team: &Team,
+        slots: &[TeamAgentSlot],
+        pickup_refs: &[&str],
+    ) -> crate::error::Result<()> {
+        let mut slots_by_role: HashMap<String, Vec<&TeamAgentSlot>> = HashMap::new();
+        for slot in slots {
+            slots_by_role.entry(slot.role.clone()).or_default().push(slot);
+        }
+
+        for (role, role_slots) in &slots_by_role {
+            let running_count = self.team_agents.values()
+                .filter(|ta| ta.team_id == team.id && ta.role == *role)
+                .count();
+            let max_for_role = role_slots.len();
+            if running_count >= max_for_role {
+                continue;
             }
 
-            for (role, role_slots) in &slots_by_role {
-                // Count running agents for this team+role
-                let running_count = self
-                    .team_agents
-                    .values()
-                    .filter(|ta| ta.team_id == team.id && ta.role == *role)
-                    .count();
+            let ready_issues = {
+                let conn = self.db.lock().unwrap();
+                Issue::get_ready_by_role(&conn, &team.project_id, role, pickup_refs)?
+            };
 
-                let max_for_role = role_slots.len();
-                if running_count >= max_for_role {
-                    continue;
+            let slots_available = max_for_role - running_count;
+            let to_spawn = std::cmp::min(slots_available, ready_issues.len());
+            for i in 0..to_spawn {
+                let issue = &ready_issues[i];
+                let slot = role_slots[i % role_slots.len()];
+                if let Err(e) = self.spawn_team_agent(team, slot, issue).await {
+                    tracing::error!(team = %team.id, role = %role, issue = %issue.id,
+                        "Failed to spawn team agent: {}", e);
                 }
+            }
+        }
+        Ok(())
+    }
 
-                // Find matching open issues
-                let ready_issues = {
-                    let conn = self.db.lock().unwrap();
-                    Issue::get_ready_by_role(&conn, &team.project_id, role, &pickup_refs)?
-                };
+    /// Pipeline dispatch: issues are worked sequentially by slot_order.
+    /// Only dispatch agents for the current pipeline stage (lowest slot_order
+    /// whose role still has open/in_progress issues).
+    async fn dispatch_pipeline(
+        &mut self,
+        team: &Team,
+        slots: &[TeamAgentSlot],
+        pickup_refs: &[&str],
+    ) -> crate::error::Result<()> {
+        // Slots are already sorted by slot_order from list_by_team.
+        // Find the current pipeline stage: the lowest slot_order whose role
+        // still has open or in_progress issues.
+        let mut current_stage_slot_order: Option<i64> = None;
+        let mut current_stage_role: Option<String> = None;
 
-                // Spawn agents up to slot count
-                let slots_available = max_for_role - running_count;
-                let to_spawn = std::cmp::min(slots_available, ready_issues.len());
+        for slot in slots {
+            let has_open = {
+                let conn = self.db.lock().unwrap();
+                let count: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM issues WHERE project_id = ?1 \
+                     AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+                     AND status IN ('open', 'in_progress') AND needs_intake = 0",
+                    rusqlite::params![team.project_id, slot.role],
+                    |row| row.get(0),
+                ).unwrap_or(0);
+                count > 0
+            };
 
-                for i in 0..to_spawn {
-                    let issue = &ready_issues[i];
-                    let slot = &role_slots[i % role_slots.len()];
-                    if let Err(e) = self.spawn_team_agent(team, slot, issue).await {
-                        tracing::error!(
-                            team = %team.id, role = %role, issue = %issue.id,
-                            "Failed to spawn team agent: {}", e
-                        );
-                    }
+            if has_open {
+                current_stage_slot_order = Some(slot.slot_order);
+                current_stage_role = Some(slot.role.clone());
+                break;
+            }
+        }
+
+        // If no stage has work, nothing to dispatch
+        let (stage_order, stage_role) = match (current_stage_slot_order, current_stage_role) {
+            (Some(o), Some(r)) => (o, r),
+            _ => return Ok(()),
+        };
+
+        // Collect all slots at the current stage order
+        let stage_slots: Vec<&TeamAgentSlot> = slots.iter()
+            .filter(|s| s.slot_order == stage_order)
+            .collect();
+
+        let running_count = self.team_agents.values()
+            .filter(|ta| ta.team_id == team.id && ta.role == stage_role)
+            .count();
+        let max_for_stage = stage_slots.len();
+        if running_count >= max_for_stage {
+            return Ok(());
+        }
+
+        let ready_issues = {
+            let conn = self.db.lock().unwrap();
+            Issue::get_ready_by_role(&conn, &team.project_id, &stage_role, pickup_refs)?
+        };
+
+        let slots_available = max_for_stage - running_count;
+        let to_spawn = std::cmp::min(slots_available, ready_issues.len());
+        for i in 0..to_spawn {
+            let issue = &ready_issues[i];
+            let slot = stage_slots[i % stage_slots.len()];
+            if let Err(e) = self.spawn_team_agent(team, slot, issue).await {
+                tracing::error!(team = %team.id, role = %stage_role, issue = %issue.id,
+                    "Failed to spawn pipeline agent: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    /// Collaborative dispatch: multiple agents work on the SAME issue simultaneously.
+    /// Picks the first ready issue, then dispatches one agent per idle slot for that issue.
+    /// Each agent gets a separate clone issue so they can independently track status.
+    async fn dispatch_collaborative(
+        &mut self,
+        team: &Team,
+        slots: &[TeamAgentSlot],
+        pickup_refs: &[&str],
+    ) -> crate::error::Result<()> {
+        // Find slots that don't already have a running agent
+        let idle_slots: Vec<&TeamAgentSlot> = slots.iter()
+            .filter(|slot| {
+                !self.team_agents.values().any(|ta| ta.slot_id == slot.id)
+            })
+            .collect();
+
+        if idle_slots.is_empty() {
+            return Ok(());
+        }
+
+        // Pick the first ready issue (any role, since collaborative teams share work)
+        let first_ready = {
+            let conn = self.db.lock().unwrap();
+            let mut found: Option<Issue> = None;
+            // Try each slot's role to find a ready issue
+            for slot in &idle_slots {
+                let ready = Issue::get_ready_by_role(&conn, &team.project_id, &slot.role, pickup_refs)?;
+                if let Some(issue) = ready.into_iter().next() {
+                    found = Some(issue);
+                    break;
+                }
+            }
+            found
+        };
+
+        let source_issue = match first_ready {
+            Some(issue) => issue,
+            None => return Ok(()),
+        };
+
+        // Dispatch the first idle slot against the original issue
+        let first_slot = idle_slots[0];
+        if let Err(e) = self.spawn_team_agent(team, first_slot, &source_issue).await {
+            tracing::error!(team = %team.id, issue = %source_issue.id,
+                "Failed to spawn collaborative agent: {}", e);
+            return Ok(());
+        }
+
+        // For remaining idle slots, create clone child issues so each agent has its own tracker
+        for slot in &idle_slots[1..] {
+            let clone_issue = {
+                let conn = self.db.lock().unwrap();
+                Issue::create(&conn, &CreateIssue {
+                    project_id: team.project_id.clone(),
+                    issue_type: Some(source_issue.issue_type.clone()),
+                    title: format!("{} [collaborative: {}]", source_issue.title, slot.role),
+                    description: Some(source_issue.description.clone()),
+                    priority: Some(source_issue.priority),
+                    depends_on: None,
+                    workflow_instance_id: source_issue.workflow_instance_id.clone(),
+                    stage_id: source_issue.stage_id.clone(),
+                    role: Some(slot.role.clone()),
+                    parent_id: Some(source_issue.id.clone()),
+                    needs_intake: Some(0),
+                    scope_mode: Some(source_issue.scope_mode.clone()),
+                })?
+            };
+            if let Err(e) = self.spawn_team_agent(team, slot, &clone_issue).await {
+                tracing::error!(team = %team.id, issue = %clone_issue.id,
+                    "Failed to spawn collaborative agent: {}", e);
+            }
+        }
+        Ok(())
+    }
+
+    /// Hierarchical dispatch: lead slots get top-level issues (parent_id IS NULL),
+    /// non-lead slots only get child issues (parent_id IS NOT NULL).
+    /// The lead agent decomposes top-level issues into children via the intake mechanism.
+    async fn dispatch_hierarchical(
+        &mut self,
+        team: &Team,
+        slots: &[TeamAgentSlot],
+        _pickup_refs: &[&str],
+    ) -> crate::error::Result<()> {
+        let lead_slots: Vec<&TeamAgentSlot> = slots.iter().filter(|s| s.is_lead).collect();
+        let worker_slots: Vec<&TeamAgentSlot> = slots.iter().filter(|s| !s.is_lead).collect();
+
+        // Dispatch lead slots against top-level issues (parent_id IS NULL)
+        for slot in &lead_slots {
+            let already_running = self.team_agents.values()
+                .any(|ta| ta.slot_id == slot.id);
+            if already_running {
+                continue;
+            }
+
+            let top_level_issue = {
+                let conn = self.db.lock().unwrap();
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM issues WHERE project_id = ?1 \
+                     AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+                     AND status = 'open' AND claimed_by IS NULL \
+                     AND parent_id IS NULL AND needs_intake = 0 \
+                     ORDER BY priority, created_at LIMIT 1"
+                )?;
+                let mut rows = stmt.query_map(
+                    rusqlite::params![team.project_id, slot.role],
+                    Issue::from_row,
+                )?;
+                match rows.next() {
+                    Some(Ok(issue)) => Some(issue),
+                    _ => None,
+                }
+            };
+
+            if let Some(issue) = top_level_issue {
+                if let Err(e) = self.spawn_team_agent(team, slot, &issue).await {
+                    tracing::error!(team = %team.id, role = %slot.role, issue = %issue.id,
+                        "Failed to spawn hierarchical lead agent: {}", e);
+                }
+            }
+        }
+
+        // Dispatch worker slots against child issues (parent_id IS NOT NULL)
+        for slot in &worker_slots {
+            let already_running = self.team_agents.values()
+                .any(|ta| ta.slot_id == slot.id);
+            if already_running {
+                continue;
+            }
+
+            let child_issue = {
+                let conn = self.db.lock().unwrap();
+                let mut stmt = conn.prepare(
+                    "SELECT * FROM issues WHERE project_id = ?1 \
+                     AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+                     AND status = 'open' AND claimed_by IS NULL \
+                     AND parent_id IS NOT NULL AND needs_intake = 0 \
+                     ORDER BY priority, created_at LIMIT 1"
+                )?;
+                let mut rows = stmt.query_map(
+                    rusqlite::params![team.project_id, slot.role],
+                    Issue::from_row,
+                )?;
+                match rows.next() {
+                    Some(Ok(issue)) => Some(issue),
+                    _ => None,
+                }
+            };
+
+            if let Some(issue) = child_issue {
+                if let Err(e) = self.spawn_team_agent(team, slot, &issue).await {
+                    tracing::error!(team = %team.id, role = %slot.role, issue = %issue.id,
+                        "Failed to spawn hierarchical worker agent: {}", e);
                 }
             }
         }

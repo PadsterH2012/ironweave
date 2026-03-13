@@ -200,6 +200,9 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_issues_parent ON issues(parent_id)", []);
     let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_issues_needs_intake ON issues(needs_intake)", []);
 
+    // Team coordination: is_lead flag for hierarchical mode
+    let _ = conn.execute("ALTER TABLE team_agent_slots ADD COLUMN is_lead INTEGER NOT NULL DEFAULT 0", []);
+
     // Attachments table
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS attachments (

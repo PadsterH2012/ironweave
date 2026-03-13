@@ -38,6 +38,7 @@ pub struct TeamAgentSlot {
     pub model: Option<String>,
     pub config: String,
     pub slot_order: i64,
+    pub is_lead: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,6 +49,7 @@ pub struct CreateTeamAgentSlot {
     pub model: Option<String>,
     pub config: Option<String>,
     pub slot_order: Option<i64>,
+    pub is_lead: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -191,10 +193,11 @@ impl Team {
         let slots = TeamAgentSlot::list_by_team(conn, template_id)?;
         for slot in slots {
             let slot_id = Uuid::new_v4().to_string();
+            let is_lead_val: i64 = if slot.is_lead { 1 } else { 0 };
             conn.execute(
-                "INSERT INTO team_agent_slots (id, team_id, role, runtime, model, config, slot_order)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![slot_id, new_id, slot.role, slot.runtime, slot.model, slot.config, slot.slot_order],
+                "INSERT INTO team_agent_slots (id, team_id, role, runtime, model, config, slot_order, is_lead)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![slot_id, new_id, slot.role, slot.runtime, slot.model, slot.config, slot.slot_order, is_lead_val],
             )?;
         }
 
@@ -212,6 +215,7 @@ impl TeamAgentSlot {
             model: row.get("model")?,
             config: row.get("config")?,
             slot_order: row.get("slot_order")?,
+            is_lead: row.get::<_, i64>("is_lead").unwrap_or(0) != 0,
         })
     }
 
@@ -219,10 +223,11 @@ impl TeamAgentSlot {
         let id = Uuid::new_v4().to_string();
         let config = input.config.as_deref().unwrap_or("{}");
         let slot_order = input.slot_order.unwrap_or(0);
+        let is_lead: i64 = if input.is_lead.unwrap_or(false) { 1 } else { 0 };
         conn.execute(
-            "INSERT INTO team_agent_slots (id, team_id, role, runtime, model, config, slot_order)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![id, input.team_id, input.role, input.runtime, input.model, config, slot_order],
+            "INSERT INTO team_agent_slots (id, team_id, role, runtime, model, config, slot_order, is_lead)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![id, input.team_id, input.role, input.runtime, input.model, config, slot_order, is_lead],
         )?;
         Self::get_by_id(conn, &id)
     }
@@ -403,6 +408,7 @@ mod tests {
             model: None,
             config: None,
             slot_order: Some(1),
+            is_lead: None,
         }).unwrap();
 
         TeamAgentSlot::create(&conn, &CreateTeamAgentSlot {
@@ -412,6 +418,7 @@ mod tests {
             model: None,
             config: None,
             slot_order: Some(2),
+            is_lead: None,
         }).unwrap();
 
         let slots = TeamAgentSlot::list_by_team(&conn, &team.id).unwrap();
@@ -440,6 +447,7 @@ mod tests {
             model: None,
             config: None,
             slot_order: None,
+            is_lead: None,
         }).unwrap();
         TeamAgentSlot::delete(&conn, &slot.id).unwrap();
         assert!(TeamAgentSlot::get_by_id(&conn, &slot.id).is_err());
@@ -466,6 +474,7 @@ mod tests {
             model: Some("claude-sonnet-4-6".to_string()),
             config: None,
             slot_order: Some(1),
+            is_lead: None,
         }).unwrap();
 
         assert_eq!(slot.model.as_deref(), Some("claude-sonnet-4-6"));
@@ -477,6 +486,7 @@ mod tests {
             model: None,
             config: None,
             slot_order: Some(2),
+            is_lead: None,
         }).unwrap();
         assert!(slot2.model.is_none());
     }
@@ -502,6 +512,7 @@ mod tests {
             model: Some("claude-sonnet-4-6".to_string()),
             config: None,
             slot_order: Some(1),
+            is_lead: None,
         }).unwrap();
 
         let updated = TeamAgentSlot::update(&conn, &slot.id, &UpdateTeamAgentSlot {
