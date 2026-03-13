@@ -265,6 +265,40 @@ export interface DashboardStats {
   running_workflows: number;
 }
 
+export interface ActivityLogEntry {
+  id: string;
+  event_type: string;
+  project_id: string | null;
+  team_id: string | null;
+  agent_id: string | null;
+  issue_id: string | null;
+  workflow_instance_id: string | null;
+  message: string;
+  metadata: string;
+  created_at: string;
+}
+
+export interface DailyMetric {
+  day: string;
+  event_type: string;
+  count: number;
+}
+
+export interface MetricsResponse {
+  daily: DailyMetric[];
+  merge_stats: { total: number; clean: number; conflicted: number; escalated: number };
+  avg_resolution_hours: number;
+}
+
+export interface SystemHealth {
+  cpu_usage_percent: number;
+  memory_used_mb: number;
+  memory_total_mb: number;
+  disk_used_gb: number;
+  disk_total_gb: number;
+  agent_process_count: number;
+}
+
 export interface BrowseEntry {
   name: string;
   type: 'directory' | 'file';
@@ -567,6 +601,9 @@ export const workflows = {
 
 export const dashboard = {
   stats: () => get<DashboardStats>('/dashboard'),
+  activity: (limit = 50, offset = 0) => get<ActivityLogEntry[]>(`/dashboard/activity?limit=${limit}&offset=${offset}`),
+  metrics: (days = 7) => get<MetricsResponse>(`/dashboard/metrics?days=${days}`),
+  system: () => get<SystemHealth>(`/dashboard/system`),
 };
 
 export const filesystem = {

@@ -1,17 +1,38 @@
 <script lang="ts">
-  import { dashboard, agents, type AgentSession, type DashboardStats } from '../lib/api';
+  import {
+    dashboard,
+    agents,
+    type AgentInfo,
+    type DashboardStats,
+    type ActivityLogEntry,
+    type MetricsResponse,
+    type SystemHealth,
+  } from '../lib/api';
+  import ActivityFeed from '../lib/components/ActivityFeed.svelte';
+  import MetricsChart from '../lib/components/MetricsChart.svelte';
+  import SystemHealthPanel from '../lib/components/SystemHealth.svelte';
 
   let stats: DashboardStats | null = $state(null);
-  let agentSessions: AgentSession[] = $state([]);
+  let agentSessions: AgentInfo[] = $state([]);
+  let activityEntries: ActivityLogEntry[] = $state([]);
+  let metricsData: MetricsResponse | null = $state(null);
+  let healthData: SystemHealth | null = $state(null);
   let error: string | null = $state(null);
+  let metricsDays: number = $state(7);
 
   async function fetchAll() {
     try {
-      const [dashStats, agentIds] = await Promise.all([
+      const [dashStats, agentIds, activity, metrics, system] = await Promise.all([
         dashboard.stats(),
         agents.list(),
+        dashboard.activity(50, 0),
+        dashboard.metrics(metricsDays),
+        dashboard.system(),
       ]);
       stats = dashStats;
+      activityEntries = activity;
+      metricsData = metrics;
+      healthData = system;
 
       if (agentIds.length > 0) {
         const sessions = await Promise.all(agentIds.map((id) => agents.get(id)));
@@ -70,6 +91,12 @@
     { label: 'Open Issues', value: stats?.open_issues ?? 0, accent: 'text-yellow-400' },
     { label: 'Running Workflows', value: stats?.running_workflows ?? 0, accent: 'text-green-400' },
   ]);
+
+  function setDays(d: number) {
+    metricsDays = d;
+    // Re-fetch metrics with new range
+    dashboard.metrics(d).then(m => { metricsData = m; }).catch(() => {});
+  }
 </script>
 
 <div class="space-y-8">
@@ -95,6 +122,55 @@
       </div>
     {/each}
   </div>
+
+  <!-- Activity Feed + Metrics Charts -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Activity Feed -->
+    <ActivityFeed entries={activityEntries} />
+
+    <!-- Metrics Charts + Merge Stats -->
+    <div class="rounded-xl bg-gray-900 border border-gray-800 p-4 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-gray-300">Metrics</h3>
+        <div class="flex gap-1">
+          <button
+            class="text-xs px-2 py-1 rounded {metricsDays === 7 ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}"
+            onclick={() => setDays(7)}
+          >7d</button>
+          <button
+            class="text-xs px-2 py-1 rounded {metricsDays === 30 ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}"
+            onclick={() => setDays(30)}
+          >30d</button>
+        </div>
+      </div>
+
+      {#if metricsData}
+        <MetricsChart daily={metricsData.daily} days={metricsDays} />
+
+        <!-- Merge Stats -->
+        <div class="pt-3 border-t border-gray-800 space-y-2">
+          <p class="text-sm text-gray-300">
+            Merges:
+            <span class="text-green-400 font-mono">{metricsData.merge_stats.clean}</span> clean,
+            <span class="text-yellow-400 font-mono">{metricsData.merge_stats.conflicted}</span> conflicts,
+            <span class="text-red-400 font-mono">{metricsData.merge_stats.escalated}</span> escalated
+          </p>
+          <p class="text-sm text-gray-400">
+            Avg resolution: <span class="text-gray-200 font-mono">{metricsData.avg_resolution_hours.toFixed(1)}</span> hours
+          </p>
+        </div>
+      {:else}
+        <div class="h-48 flex items-center justify-center text-gray-500 text-sm">
+          Loading metrics...
+        </div>
+      {/if}
+    </div>
+  </div>
+
+  <!-- System Health -->
+  {#if healthData}
+    <SystemHealthPanel health={healthData} />
+  {/if}
 
   <!-- Active agents -->
   <div>
@@ -122,22 +198,6 @@
             <div class="flex items-center gap-2">
               <span class="inline-block h-2.5 w-2.5 rounded-full {stateColor(agent.state)}"></span>
               <span class="text-sm text-gray-300 capitalize">{agent.state}</span>
-            </div>
-
-            <!-- Task -->
-            <div class="text-xs text-gray-500">
-              {#if agent.claimed_task_id}
-                <span class="text-gray-400">Task:</span>
-                <span class="font-mono text-gray-300 ml-1">{truncateId(agent.claimed_task_id)}</span>
-              {:else}
-                <span class="italic">No task claimed</span>
-              {/if}
-            </div>
-
-            <!-- Footer: heartbeat + cost -->
-            <div class="flex items-center justify-between text-xs text-gray-500 pt-1 border-t border-gray-800">
-              <span title={agent.last_heartbeat}>{timeAgo(agent.last_heartbeat)}</span>
-              <span>${agent.cost.toFixed(4)}</span>
             </div>
           </div>
         {/each}
