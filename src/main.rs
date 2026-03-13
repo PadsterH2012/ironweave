@@ -166,6 +166,9 @@ async fn main() {
         .route("/api/workflows/{wid}/instances", get(api::workflows::list_instances).post(api::workflows::create_instance))
         // Dashboard
         .route("/api/dashboard", get(api::dashboard::stats))
+        .route("/api/dashboard/activity", get(api::dashboard::activity))
+        .route("/api/dashboard/metrics", get(api::dashboard::metrics))
+        .route("/api/dashboard/system", get(api::dashboard::system))
         // Filesystem browser
         .route("/api/filesystem/browse", get(api::filesystem::browse))
         // Mounts
