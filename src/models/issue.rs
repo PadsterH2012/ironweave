@@ -23,6 +23,7 @@ pub struct Issue {
     pub parent_id: Option<String>,
     pub needs_intake: i64,
     pub scope_mode: String,
+    pub retry_count: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -75,6 +76,7 @@ impl Issue {
             parent_id: row.get("parent_id")?,
             needs_intake: row.get("needs_intake")?,
             scope_mode: row.get("scope_mode")?,
+            retry_count: row.get("retry_count").unwrap_or(0),
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
@@ -146,7 +148,8 @@ impl Issue {
 
     pub fn unclaim(conn: &Connection, issue_id: &str) -> Result<Self> {
         let changes = conn.execute(
-            "UPDATE issues SET claimed_by = NULL, claimed_at = NULL, status = 'open', updated_at = datetime('now')
+            "UPDATE issues SET claimed_by = NULL, claimed_at = NULL, status = 'open',
+             retry_count = COALESCE(retry_count, 0) + 1, updated_at = datetime('now')
              WHERE id = ?1",
             params![issue_id],
         )?;

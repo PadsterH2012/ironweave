@@ -41,10 +41,29 @@ impl WorktreeManager {
         let branch_name = format!("ironweave/{}/{}", agent_id, task_hash);
         let worktree_path = self.base_dir.join(&branch_name.replace('/', "-"));
 
-        // Create branch from base
+        // Create branch from base (or reuse if it already exists from a previous attempt)
         let base = repo.find_branch(base_branch, git2::BranchType::Local)?;
         let commit = base.get().peel_to_commit()?;
-        repo.branch(&branch_name, &commit, false)?;
+        match repo.branch(&branch_name, &commit, false) {
+            Ok(_) => {},
+            Err(e) if e.code() == git2::ErrorCode::Exists => {
+                // Branch already exists from a previous failed attempt — clean up old worktree first
+                let old_wt_name = branch_name.replace('/', "-");
+                if let Ok(wt) = repo.find_worktree(&old_wt_name) {
+                    let mut prune_opts = git2::WorktreePruneOptions::new();
+                    prune_opts.valid(true).working_tree(true);
+                    let _ = wt.prune(Some(&mut prune_opts));
+                }
+                if worktree_path.exists() {
+                    let _ = std::fs::remove_dir_all(&worktree_path);
+                }
+                // Delete and recreate the branch to get a clean state
+                let mut existing = repo.find_branch(&branch_name, git2::BranchType::Local)?;
+                existing.delete()?;
+                repo.branch(&branch_name, &commit, false)?;
+            },
+            Err(e) => return Err(e.into()),
+        }
 
         // Look up the newly created branch reference
         let ref_name = format!("refs/heads/{}", branch_name);

@@ -203,6 +203,9 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     // Team coordination: is_lead flag for hierarchical mode
     let _ = conn.execute("ALTER TABLE team_agent_slots ADD COLUMN is_lead INTEGER NOT NULL DEFAULT 0", []);
 
+    // Retry tracking for issues
+    let _ = conn.execute("ALTER TABLE issues ADD COLUMN retry_count INTEGER DEFAULT 0", []);
+
     // Attachments table
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS attachments (

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use portable_pty::PtySize;
+use rusqlite::params;
 use tokio::sync::mpsc;
 use tokio::time::{interval, Duration, Instant};
 
@@ -764,14 +765,32 @@ impl OrchestratorRunner {
                 // unclaim so it can be retried, regardless of exit code
                 if issue.status != "closed" {
                     let conn = self.db.lock().unwrap();
-                    let _ = Issue::unclaim(&conn, &ta.issue_id);
                     let state = if success { "completed" } else { "failed" };
                     let _ = AgentSession::update_state(&conn, &ta.agent_session_id, state);
-                    tracing::warn!(
-                        team = %ta.team_id, role = %ta.role, issue = %ta.issue_id,
-                        exit_success = success,
-                        "Team agent exited without closing issue — unclaiming for retry"
-                    );
+
+                    const MAX_RETRIES: i64 = 3;
+                    if issue.retry_count >= MAX_RETRIES {
+                        // Max retries reached — mark as needs_investigation instead of retrying
+                        let _ = conn.execute(
+                            "UPDATE issues SET status = 'open', claimed_by = NULL, claimed_at = NULL, \
+                             needs_intake = 1, updated_at = datetime('now') WHERE id = ?1",
+                            params![&ta.issue_id],
+                        );
+                        tracing::error!(
+                            team = %ta.team_id, role = %ta.role, issue = %ta.issue_id,
+                            retries = issue.retry_count,
+                            "Issue hit max retries ({}) — flagging for investigation",
+                            MAX_RETRIES,
+                        );
+                    } else {
+                        let _ = Issue::unclaim(&conn, &ta.issue_id);
+                        tracing::warn!(
+                            team = %ta.team_id, role = %ta.role, issue = %ta.issue_id,
+                            exit_success = success, retry = issue.retry_count + 1,
+                            "Team agent exited without closing issue — unclaiming for retry ({}/{})",
+                            issue.retry_count + 1, MAX_RETRIES,
+                        );
+                    }
                 }
                 to_remove.push(key.clone());
                 continue;
