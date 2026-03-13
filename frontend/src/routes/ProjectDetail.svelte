@@ -16,6 +16,7 @@
     type TeamStatus,
     type MountConfig,
     type WorkflowDefinition,
+    type WorkflowInstance,
     RUNTIME_MODELS,
     PREDEFINED_ROLES,
     sync,
@@ -26,6 +27,7 @@
   import ProjectHistory from '../lib/components/ProjectHistory.svelte';
   import ProjectSettings from '../lib/components/ProjectSettings.svelte';
   import MergeQueue from '../lib/components/MergeQueue.svelte';
+  import DagGraph from '../lib/components/DagGraph.svelte';
 
   interface Props {
     params: { id: string };
@@ -72,6 +74,12 @@
   let teamStatuses: Record<string, TeamStatus> = $state({});
   let activatingTeamId: string | null = $state(null);
   let autoPickupSelections: Record<string, string[]> = $state({});
+
+  // Workflow instance state
+  let workflowInstances: Record<string, WorkflowInstance[]> = $state({});
+  let startingWorkflow: string | null = $state(null);
+  let approvingGate: string | null = $state(null);
+  let expandedWorkflowId: string | null = $state(null);
 
   const PICKUP_TYPES = ['task', 'bug', 'feature'];
 
@@ -161,6 +169,10 @@
   async function fetchWorkflows() {
     try {
       workflowDefs = await workflows.definitions.list(params.id);
+      // Fetch instances for each workflow
+      for (const wf of workflowDefs) {
+        fetchWorkflowInstances(wf.id);
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to fetch workflows';
     }
@@ -278,10 +290,11 @@
     if (pid) {
       fetchProject().then(() => { autoSync(); loadAppStatus(); });
       fetchTeams().then(() => {
-        // Fetch slots for active teams so roles are available for issue creation
+        // Fetch slots and statuses for active teams
         for (const team of teamList) {
           if (team.is_active) {
             fetchSlots(team.id);
+            fetchTeamStatus(team.id);
           }
         }
       });
@@ -370,6 +383,90 @@
       await fetchTeamStatus(teamId);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to update auto-pickup config';
+    }
+  }
+
+  async function fetchWorkflowInstances(workflowId: string) {
+    try {
+      const instances = await workflows.instances.list(workflowId);
+      workflowInstances = { ...workflowInstances, [workflowId]: instances };
+    } catch (e) {
+      console.error('Failed to fetch workflow instances:', e);
+    }
+  }
+
+  async function handleStartWorkflow(wf: WorkflowDefinition) {
+    startingWorkflow = wf.id;
+    try {
+      await workflows.instances.create(wf.id, { definition_id: wf.id });
+      await fetchWorkflowInstances(wf.id);
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to start workflow';
+    } finally {
+      startingWorkflow = null;
+    }
+  }
+
+  async function handleApproveGate(wf: WorkflowDefinition, instanceId: string, stageId: string) {
+    approvingGate = stageId;
+    try {
+      await workflows.instances.approveGate(wf.id, instanceId, stageId);
+      await fetchWorkflowInstances(wf.id);
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to approve gate';
+    } finally {
+      approvingGate = null;
+    }
+  }
+
+  function getLatestInstance(workflowId: string): WorkflowInstance | null {
+    const instances = workflowInstances[workflowId];
+    if (!instances || instances.length === 0) return null;
+    return instances.reduce((latest, inst) =>
+      inst.created_at > latest.created_at ? inst : latest
+    );
+  }
+
+  function parseStageStatuses(instance: WorkflowInstance | null): Record<string, string> {
+    if (!instance?.checkpoint) return {};
+    try {
+      const checkpoint = JSON.parse(instance.checkpoint);
+      if (checkpoint.stage_statuses) return checkpoint.stage_statuses;
+      if (checkpoint.stages) return checkpoint.stages;
+      return {};
+    } catch {
+      return {};
+    }
+  }
+
+  function parseDagStages(dag: string): { id: string; name: string; runtime: string; prompt: string; depends_on: string[]; is_manual_gate: boolean }[] {
+    try {
+      const parsed = JSON.parse(dag);
+      if (Array.isArray(parsed.stages)) return parsed.stages;
+      if (Array.isArray(parsed)) return parsed;
+      return [];
+    } catch {
+      return [];
+    }
+  }
+
+  function getWaitingApprovalStages(stageStatuses: Record<string, string>): string[] {
+    return Object.entries(stageStatuses)
+      .filter(([, status]) => {
+        const s = status.toLowerCase();
+        return s === 'waiting_approval' || s === 'waitingapproval';
+      })
+      .map(([id]) => id);
+  }
+
+  function stateBadge(state: string): string {
+    switch (state.toLowerCase()) {
+      case 'running': return 'bg-blue-600 text-blue-100';
+      case 'completed': return 'bg-green-600 text-green-100';
+      case 'failed': return 'bg-red-600 text-red-100';
+      case 'pending': return 'bg-gray-600 text-gray-100';
+      case 'paused': return 'bg-yellow-600 text-yellow-100';
+      default: return 'bg-gray-600 text-gray-100';
     }
   }
 
@@ -604,13 +701,22 @@
                       &times;
                     </button>
                   </div>
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-[10px] font-medium px-2 py-0.5 rounded-full {modeBadge(team.coordination_mode)}">
                       {team.coordination_mode}
                     </span>
                     <span class="text-xs text-gray-500">
                       {teamSlots[team.id]?.length ?? team.max_agents} {teamSlots[team.id] ? 'slot' : 'max agent'}{(teamSlots[team.id]?.length ?? team.max_agents) !== 1 ? 's' : ''}
                     </span>
+                    {#if teamStatuses[team.id]}
+                      {@const status = teamStatuses[team.id]}
+                      {@const totalSlots = status.roles.reduce((sum, r) => sum + r.slot_count, 0)}
+                      {@const activeAgents = status.roles.reduce((sum, r) => sum + r.running, 0)}
+                      {@const idleAgents = totalSlots - activeAgents}
+                      <span class="text-[10px] text-gray-400">
+                        Active: <span class="text-green-400">{activeAgents}</span> / Idle: <span class="text-gray-500">{idleAgents}</span> / Total: {totalSlots}
+                      </span>
+                    {/if}
                     {#if expandedTeamId === team.id}
                       <span class="text-xs text-gray-600 ml-auto">click to collapse</span>
                     {/if}
@@ -864,23 +970,75 @@
             No workflow definitions yet.
           </div>
         {:else}
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div class="space-y-4">
             {#each workflowDefs as wf (wf.id)}
-              <!-- svelte-ignore a11y_click_events_have_key_events -->
-              <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div
-                onclick={() => push(`/projects/${params.id}/workflows/${wf.id}`)}
-                class="rounded-xl bg-gray-900 border border-gray-800 p-4 space-y-2 cursor-pointer hover:border-gray-600 transition-colors group"
-              >
-                <h3 class="text-sm font-semibold text-white group-hover:text-purple-400 transition-colors">
-                  {wf.name}
-                </h3>
-                <div class="flex items-center gap-3 text-xs text-gray-500">
-                  <span>v{wf.version}</span>
-                  {#if wf.git_sha}
-                    <span class="font-mono">{wf.git_sha.slice(0, 7)}</span>
-                  {/if}
+              {@const latestInstance = getLatestInstance(wf.id)}
+              {@const stages = parseDagStages(wf.dag)}
+              {@const stageStatuses = parseStageStatuses(latestInstance)}
+              {@const waitingStages = getWaitingApprovalStages(stageStatuses)}
+              <div class="rounded-xl bg-gray-900 border border-gray-800 space-y-0 {expandedWorkflowId === wf.id ? 'border-purple-800' : ''}">
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="p-4 space-y-2 cursor-pointer hover:bg-gray-800/50 transition-colors"
+                  onclick={() => { expandedWorkflowId = expandedWorkflowId === wf.id ? null : wf.id; }}
+                >
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                      <h3 class="text-sm font-semibold text-white">{wf.name}</h3>
+                      <span class="text-xs text-gray-500">v{wf.version}</span>
+                      {#if wf.git_sha}
+                        <span class="text-xs text-gray-500 font-mono">{wf.git_sha.slice(0, 7)}</span>
+                      {/if}
+                      {#if latestInstance}
+                        <span class="text-[10px] font-medium px-2 py-0.5 rounded-full {stateBadge(latestInstance.state)}">
+                          {latestInstance.state}
+                        </span>
+                      {/if}
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <button
+                        onclick={(e) => { e.stopPropagation(); handleStartWorkflow(wf); }}
+                        disabled={startingWorkflow === wf.id}
+                        class="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white transition-colors"
+                      >
+                        {startingWorkflow === wf.id ? 'Starting...' : 'Start'}
+                      </button>
+                      <button
+                        onclick={(e) => { e.stopPropagation(); push(`/projects/${params.id}/workflows/${wf.id}`); }}
+                        class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
+                      >
+                        Details
+                      </button>
+                    </div>
+                  </div>
                 </div>
+
+                {#if expandedWorkflowId === wf.id && stages.length > 0}
+                  <div class="border-t border-gray-800 p-4 space-y-3">
+                    <div class="h-[400px]">
+                      <DagGraph {stages} {stageStatuses} />
+                    </div>
+
+                    {#if waitingStages.length > 0 && latestInstance}
+                      <div class="border-t border-gray-800 pt-3 space-y-2">
+                        <h4 class="text-xs font-medium text-yellow-400 uppercase tracking-wider">Pending Approvals</h4>
+                        <div class="flex flex-wrap gap-2">
+                          {#each waitingStages as stageId}
+                            {@const stageName = stages.find(s => s.id === stageId)?.name ?? stageId}
+                            <button
+                              onclick={() => handleApproveGate(wf, latestInstance.id, stageId)}
+                              disabled={approvingGate === stageId}
+                              class="px-3 py-1.5 text-xs font-medium rounded-lg bg-yellow-600 hover:bg-yellow-500 disabled:bg-gray-700 disabled:text-gray-500 text-white transition-colors"
+                            >
+                              {approvingGate === stageId ? 'Approving...' : `Approve: ${stageName}`}
+                            </button>
+                          {/each}
+                        </div>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
               </div>
             {/each}
           </div>

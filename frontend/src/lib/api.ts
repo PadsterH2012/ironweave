@@ -596,6 +596,8 @@ export const workflows = {
   instances: {
     list: (workflowId: string) => get<WorkflowInstance[]>(`/workflows/${workflowId}/instances`),
     create: (workflowId: string, data: CreateInstance) => post<WorkflowInstance>(`/workflows/${workflowId}/instances`, data),
+    approveGate: (workflowId: string, instanceId: string, stageId: string) =>
+      post(`/workflows/${workflowId}/instances/${instanceId}/stages/${stageId}/approve`, {}),
   },
 };
 

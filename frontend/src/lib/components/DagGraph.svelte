@@ -25,15 +25,15 @@
   function getStatusColor(stageId: string): string {
     if (!stageStatuses) return '#374151';
     const status = stageStatuses[stageId];
-    if (!status) return '#374151';
-    if (status === 'Pending') return '#6b7280';
-    if (status === 'Running') return '#3b82f6';
-    if (status === 'WaitingApproval') return '#eab308';
-    if (status === 'Completed') return '#22c55e';
-    if (status === 'Skipped') return '#9ca3af';
-    if (typeof status === 'object' || (typeof status === 'string' && status.startsWith('{'))) return '#ef4444';
-    // Failed as object key
-    return '#374151';
+    if (!status) return '#6b7280';
+    const s = status.toLowerCase();
+    if (s === 'pending') return '#6b7280';
+    if (s === 'running') return '#3b82f6';
+    if (s === 'waiting_approval' || s === 'waitingapproval') return '#f59e0b';
+    if (s === 'completed') return '#10b981';
+    if (s === 'skipped') return '#9ca3af';
+    if (s === 'failed' || typeof status === 'object' || (typeof status === 'string' && status.startsWith('{'))) return '#ef4444';
+    return '#6b7280';
   }
 
   function getStatusName(stageId: string): string | null {
@@ -58,14 +58,14 @@
   function getBorderStyle(stageId: string): string {
     if (!stageStatuses) return 'solid';
     const status = stageStatuses[stageId];
-    if (status === 'Skipped') return 'dashed';
+    if (status.toLowerCase() === 'skipped') return 'dashed';
     return 'solid';
   }
 
   function getBorderWidth(stageId: string): number {
     if (!stageStatuses) return 2;
     const status = stageStatuses[stageId];
-    if (status === 'Running') return 4;
+    if (status.toLowerCase() === 'running') return 4;
     return 2;
   }
 
