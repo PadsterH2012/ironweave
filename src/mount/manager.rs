@@ -51,9 +51,16 @@ impl MountManager {
         let mount = Mount::get_by_id(&conn, mount_id)?;
         drop(conn);
 
-        let output = Command::new("sudo")
-            .args(["umount", &mount.local_mount_point])
-            .output()?;
+        // Use fusermount for SSHFS (user-owned FUSE mounts), sudo umount for others
+        let output = if mount.mount_type == "sshfs" {
+            Command::new("fusermount")
+                .args(["-u", &mount.local_mount_point])
+                .output()?
+        } else {
+            Command::new("sudo")
+                .args(["umount", &mount.local_mount_point])
+                .output()?
+        };
 
         let conn = self.db.lock().unwrap();
         if output.status.success() {
