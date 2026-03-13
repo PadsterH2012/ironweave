@@ -26,6 +26,8 @@ pub struct AgentInfo {
     pub id: String,
     pub runtime: String,
     pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 pub async fn spawn(
@@ -65,6 +67,7 @@ pub async fn spawn(
         id: session_id,
         runtime: input.runtime,
         state: "running".to_string(),
+        role: None,
     };
 
     Ok((StatusCode::CREATED, Json(info)))
@@ -72,12 +75,23 @@ pub async fn spawn(
 
 pub async fn list(State(state): State<AppState>) -> Json<Vec<AgentInfo>> {
     let active = state.process_manager.list_active().await;
+    let conn = state.db.lock().unwrap();
     let infos: Vec<AgentInfo> = active
         .into_iter()
-        .map(|(id, runtime)| AgentInfo {
-            id,
-            runtime,
-            state: "running".to_string(),
+        .map(|(id, runtime)| {
+            let role = conn.query_row(
+                "SELECT tas.role FROM agent_sessions a \
+                 JOIN team_agent_slots tas ON a.slot_id = tas.id \
+                 WHERE a.id = ?1",
+                rusqlite::params![&id],
+                |row| row.get::<_, String>(0),
+            ).ok();
+            AgentInfo {
+                id,
+                runtime,
+                state: "running".to_string(),
+                role,
+            }
         })
         .collect();
     Json(infos)
@@ -94,10 +108,21 @@ pub async fn get_agent(
         .ok_or(StatusCode::NOT_FOUND)?;
 
     let locked = agent.lock().await;
+    let role = {
+        let conn = state.db.lock().unwrap();
+        conn.query_row(
+            "SELECT tas.role FROM agent_sessions a \
+             JOIN team_agent_slots tas ON a.slot_id = tas.id \
+             WHERE a.id = ?1",
+            rusqlite::params![&id],
+            |row| row.get::<_, String>(0),
+        ).ok()
+    };
     let info = AgentInfo {
         id: locked.session_id.clone(),
         runtime: locked.runtime.clone(),
         state: "running".to_string(),
+        role,
     };
     Ok(Json(info))
 }

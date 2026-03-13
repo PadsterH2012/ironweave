@@ -189,6 +189,11 @@
               </span>
             </div>
 
+            <!-- Role -->
+            {#if agent.role}
+              <p class="text-xs text-gray-400">{agent.role}</p>
+            {/if}
+
             <!-- State -->
             <div class="flex items-center gap-2">
               <span class="inline-block h-2.5 w-2.5 rounded-full {stateColor(agent.state)}"></span>

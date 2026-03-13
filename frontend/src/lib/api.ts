@@ -242,6 +242,7 @@ export interface AgentInfo {
   id: string;
   runtime: string;
   state: string;
+  role?: string;
 }
 
 export interface SpawnAgentRequest {
