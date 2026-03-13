@@ -117,6 +117,20 @@ export interface UpdateTeamAgentSlot {
   slot_order?: number;
 }
 
+export interface ScalingRecommendation {
+  action: string;
+  count: number;
+  reason: string;
+}
+
+export interface ScalingInfo {
+  recommendation: ScalingRecommendation;
+  pool_depth: number;
+  idle_agents: number;
+  active_agents: number;
+  max_agents: number;
+}
+
 export interface TeamStatus {
   team_id: string;
   is_active: boolean;
@@ -128,6 +142,23 @@ export interface TeamStatus {
     runtime: string;
     model: string | null;
   }[];
+  scaling: ScalingInfo;
+}
+
+export interface RuntimeCapabilities {
+  streaming: boolean;
+  tool_use: boolean;
+  model_selection: boolean;
+  allowed_tools_filter: boolean;
+  dangerously_skip_permissions: boolean;
+  non_interactive: boolean;
+  supported_models: string[];
+}
+
+export interface RuntimeInfo {
+  id: string;
+  name: string;
+  capabilities: RuntimeCapabilities;
 }
 
 export const RUNTIME_MODELS: Record<string, string[]> = {
@@ -677,6 +708,10 @@ export interface MergeQueueEntry {
   created_at: string;
   updated_at: string;
 }
+
+export const runtimes = {
+  list: () => get<RuntimeInfo[]>('/runtimes'),
+};
 
 export const mergeQueue = {
   list: (projectId: string) => get<MergeQueueEntry[]>(`/projects/${projectId}/merge-queue`),

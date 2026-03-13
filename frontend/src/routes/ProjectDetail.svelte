@@ -949,6 +949,27 @@
                               </div>
                             {/each}
                           </div>
+
+                          <!-- Scaling recommendation -->
+                          {#if teamStatuses[team.id].scaling}
+                            {@const s = teamStatuses[team.id].scaling}
+                            <div class="mt-3 pt-3 border-t border-gray-800">
+                              <h4 class="text-xs font-medium text-gray-400 uppercase tracking-wider mb-2">Scaling</h4>
+                              <div class="flex items-center gap-3 text-xs">
+                                <span class="text-gray-400">Pool: <span class="text-white font-medium">{s.pool_depth}</span></span>
+                                <span class="text-gray-400">Active: <span class="text-green-400 font-medium">{s.active_agents}</span></span>
+                                <span class="text-gray-400">Idle: <span class="text-yellow-400 font-medium">{s.idle_agents}</span></span>
+                                <span class="text-gray-400">Max: <span class="text-white font-medium">{s.max_agents}</span></span>
+                              </div>
+                              {#if s.recommendation.action !== 'NoChange'}
+                                <div class="mt-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium
+                                  {s.recommendation.action === 'SpawnMore' ? 'bg-blue-900/40 text-blue-300 border border-blue-800' : 'bg-amber-900/40 text-amber-300 border border-amber-800'}">
+                                  {s.recommendation.action === 'SpawnMore' ? '↑' : '↓'}
+                                  {s.recommendation.reason}
+                                </div>
+                              {/if}
+                            </div>
+                          {/if}
                         </div>
                       {/if}
                     {/if}

@@ -16,6 +16,21 @@ impl RuntimeAdapter for OpenCodeAdapter {
         "opencode"
     }
 
+    fn capabilities(&self) -> RuntimeCapabilities {
+        RuntimeCapabilities {
+            streaming: true,
+            tool_use: true,
+            model_selection: true,
+            allowed_tools_filter: false,
+            dangerously_skip_permissions: false,
+            non_interactive: true,
+            supported_models: vec![
+                "claude-sonnet-4-6".into(),
+                "gpt-4o".into(),
+            ],
+        }
+    }
+
     async fn check_available(&self) -> bool {
         Command::new(self.binary())
             .arg("--version")

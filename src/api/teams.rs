@@ -183,10 +183,62 @@ pub async fn team_status(
         }));
     }
 
+    // Scaling recommendation
+    let total_running: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM agent_sessions WHERE team_id = ?1 AND state = 'running'",
+        params![id],
+        |row| row.get(0),
+    ).unwrap_or(0);
+    let total_idle: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM agent_sessions WHERE team_id = ?1 AND state IN ('idle', 'ready')",
+        params![id],
+        |row| row.get(0),
+    ).unwrap_or(0);
+    let pool_depth: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM issues WHERE project_id = ?1 AND status = 'open' AND claimed_by IS NULL AND needs_intake = 0",
+        params![team.project_id],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    let max_agents = team.max_agents as usize;
+    let idle = total_idle as usize;
+    let active = total_running as usize;
+    let total_healthy = idle + active;
+    let pool = pool_depth as usize;
+
+    let scaling = if pool > idle && total_healthy < max_agents {
+        let needed = pool - idle;
+        let can_spawn = max_agents - total_healthy;
+        serde_json::json!({
+            "action": "SpawnMore",
+            "count": needed.min(can_spawn),
+            "reason": format!("{} tasks waiting, {} idle agents, room for {} more", pool, idle, can_spawn)
+        })
+    } else if pool == 0 && idle > 1 {
+        serde_json::json!({
+            "action": "DrainExcess",
+            "count": idle - 1,
+            "reason": format!("No tasks waiting, {} idle agents — recommend draining {}", idle, idle - 1)
+        })
+    } else {
+        serde_json::json!({
+            "action": "NoChange",
+            "count": 0,
+            "reason": "Pool balanced"
+        })
+    };
+
     Ok(Json(serde_json::json!({
         "team_id": team.id,
         "is_active": team.is_active,
         "auto_pickup_types": team.get_auto_pickup_types(),
         "roles": role_status,
+        "scaling": {
+            "recommendation": scaling,
+            "pool_depth": pool,
+            "idle_agents": idle,
+            "active_agents": active,
+            "max_agents": max_agents,
+        },
     })))
 }

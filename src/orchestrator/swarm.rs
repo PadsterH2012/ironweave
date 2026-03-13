@@ -24,11 +24,24 @@ pub enum AgentSwarmState {
 }
 
 /// Scaling recommendation
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "action", content = "count")]
 pub enum ScalingAction {
     SpawnMore(usize),
     DrainExcess(usize),
     NoChange,
+}
+
+/// Full scaling context returned by the API
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ScalingRecommendation {
+    pub action: ScalingAction,
+    pub pool_depth: usize,
+    pub idle_agents: usize,
+    pub active_agents: usize,
+    pub crashed_agents: usize,
+    pub total_agents: usize,
+    pub max_agents: usize,
 }
 
 pub struct SwarmCoordinator {
@@ -202,6 +215,11 @@ impl SwarmCoordinator {
 
     /// Get scaling recommendation based on pool depth vs active agents.
     pub fn scaling_recommendation(&self) -> Result<ScalingAction> {
+        Ok(self.scaling_detail()?.action)
+    }
+
+    /// Get full scaling context including recommendation and agent counts.
+    pub fn scaling_detail(&self) -> Result<ScalingRecommendation> {
         let conn = self
             .db
             .lock()
@@ -215,21 +233,37 @@ impl SwarmCoordinator {
             .values()
             .filter(|a| a.state == AgentSwarmState::Idle)
             .count();
-        let total_agents = self
+        let active_count = self
             .agents
             .values()
-            .filter(|a| a.state != AgentSwarmState::Crashed)
+            .filter(|a| a.state == AgentSwarmState::Working)
             .count();
+        let crashed_count = self
+            .agents
+            .values()
+            .filter(|a| a.state == AgentSwarmState::Crashed)
+            .count();
+        let total_healthy = idle_count + active_count;
 
-        if pool_depth > idle_count && total_agents < self.max_agents {
+        let action = if pool_depth > idle_count && total_healthy < self.max_agents {
             let needed = pool_depth - idle_count;
-            let can_spawn = self.max_agents - total_agents;
-            Ok(ScalingAction::SpawnMore(needed.min(can_spawn)))
+            let can_spawn = self.max_agents - total_healthy;
+            ScalingAction::SpawnMore(needed.min(can_spawn))
         } else if pool_depth == 0 && idle_count > 1 {
-            Ok(ScalingAction::DrainExcess(idle_count - 1))
+            ScalingAction::DrainExcess(idle_count - 1)
         } else {
-            Ok(ScalingAction::NoChange)
-        }
+            ScalingAction::NoChange
+        };
+
+        Ok(ScalingRecommendation {
+            action,
+            pool_depth,
+            idle_agents: idle_count,
+            active_agents: active_count,
+            crashed_agents: crashed_count,
+            total_agents: idle_count + active_count + crashed_count,
+            max_agents: self.max_agents,
+        })
     }
 
     /// Register an agent in the swarm.

@@ -16,6 +16,22 @@ impl RuntimeAdapter for ClaudeAdapter {
         "claude"
     }
 
+    fn capabilities(&self) -> RuntimeCapabilities {
+        RuntimeCapabilities {
+            streaming: true,
+            tool_use: true,
+            model_selection: true,
+            allowed_tools_filter: true,
+            dangerously_skip_permissions: true,
+            non_interactive: false,
+            supported_models: vec![
+                "claude-opus-4-6".into(),
+                "claude-sonnet-4-6".into(),
+                "claude-haiku-4-5-20251001".into(),
+            ],
+        }
+    }
+
     async fn check_available(&self) -> bool {
         Command::new(self.binary())
             .arg("--version")

@@ -5,6 +5,17 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeCapabilities {
+    pub streaming: bool,
+    pub tool_use: bool,
+    pub model_selection: bool,
+    pub allowed_tools_filter: bool,
+    pub dangerously_skip_permissions: bool,
+    pub non_interactive: bool,
+    pub supported_models: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaywrightEnv {
     pub browsers_path: String,
     pub skip_download: bool,
@@ -62,6 +73,7 @@ pub struct SpawnedPty {
 pub trait RuntimeAdapter: Send + Sync {
     fn name(&self) -> &str;
     fn binary(&self) -> &str;
+    fn capabilities(&self) -> RuntimeCapabilities;
     async fn check_available(&self) -> bool;
     fn build_command(&self, config: &AgentConfig) -> CommandBuilder;
     fn spawn_pty(&self, config: &AgentConfig, size: PtySize) -> crate::error::Result<SpawnedPty>;

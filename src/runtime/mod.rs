@@ -30,4 +30,18 @@ impl RuntimeRegistry {
     pub fn list(&self) -> Vec<String> {
         self.adapters.keys().cloned().collect()
     }
+
+    pub fn list_with_capabilities(&self) -> Vec<serde_json::Value> {
+        self.adapters
+            .iter()
+            .map(|(key, adapter)| {
+                let caps = adapter.capabilities();
+                serde_json::json!({
+                    "id": key,
+                    "name": adapter.name(),
+                    "capabilities": caps,
+                })
+            })
+            .collect()
+    }
 }

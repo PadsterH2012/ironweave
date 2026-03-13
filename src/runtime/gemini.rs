@@ -16,6 +16,21 @@ impl RuntimeAdapter for GeminiAdapter {
         "gemini"
     }
 
+    fn capabilities(&self) -> RuntimeCapabilities {
+        RuntimeCapabilities {
+            streaming: true,
+            tool_use: true,
+            model_selection: true,
+            allowed_tools_filter: false,
+            dangerously_skip_permissions: false,
+            non_interactive: false,
+            supported_models: vec![
+                "gemini-2.5-pro".into(),
+                "gemini-2.5-flash".into(),
+            ],
+        }
+    }
+
     async fn check_available(&self) -> bool {
         Command::new(self.binary())
             .arg("--version")

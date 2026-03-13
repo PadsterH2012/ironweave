@@ -204,7 +204,9 @@ async fn main() {
         .route("/api/projects/{pid}/import-plan", post(api::plan_import::import_plan))
         // Merge queue
         .route("/api/projects/{pid}/merge-queue", get(api::merge_queue::list_queue))
-        .route("/api/projects/{pid}/merge-queue/{id}/approve", post(api::merge_queue::approve_merge));
+        .route("/api/projects/{pid}/merge-queue/{id}/approve", post(api::merge_queue::approve_merge))
+        // Runtimes
+        .route("/api/runtimes", get(api::runtimes::list));
 
     // Only add auth middleware if auth is configured
     if auth_config.is_some() {
