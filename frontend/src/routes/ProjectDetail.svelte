@@ -25,6 +25,7 @@
   import ProjectFiles from '../lib/components/ProjectFiles.svelte';
   import ProjectHistory from '../lib/components/ProjectHistory.svelte';
   import ProjectSettings from '../lib/components/ProjectSettings.svelte';
+  import MergeQueue from '../lib/components/MergeQueue.svelte';
 
   interface Props {
     params: { id: string };
@@ -78,6 +79,7 @@
     { key: 'teams', label: 'Teams' },
     { key: 'issues', label: 'Issues' },
     { key: 'workflows', label: 'Workflows' },
+    { key: 'merge-queue', label: 'Merge Queue' },
     { key: 'files', label: 'Files' },
     ...(project?.mount_id ? [{ key: 'history', label: 'History' }] : []),
     { key: 'settings', label: 'Settings' },
@@ -884,6 +886,8 @@
           </div>
         {/if}
       </div>
+    {:else if activeTab === 'merge-queue'}
+      <MergeQueue projectId={params.id} />
     {:else if activeTab === 'files'}
       <ProjectFiles projectId={params.id} />
     {:else if activeTab === 'history'}

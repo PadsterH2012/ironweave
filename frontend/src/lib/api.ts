@@ -661,6 +661,26 @@ export const proxyConfigs = {
   test: (id: string) => post<TestConnectionResult>(`/proxy-configs/${id}/test`, {}),
 };
 
+export interface MergeQueueEntry {
+  id: string;
+  project_id: string;
+  branch_name: string;
+  agent_session_id: string | null;
+  issue_id: string | null;
+  team_id: string | null;
+  status: string; // pending, merging, conflicted, resolving, resolved, merged, failed
+  conflict_files: string; // JSON array
+  resolver_agent_id: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const mergeQueue = {
+  list: (projectId: string) => get<MergeQueueEntry[]>(`/projects/${projectId}/merge-queue`),
+  approve: (projectId: string, id: string) => post<MergeQueueEntry>(`/projects/${projectId}/merge-queue/${id}/approve`, {}),
+};
+
 export const sync = {
   trigger: (projectId: string) => post<SyncStatus>(`/projects/${projectId}/sync`, {}),
   status: (projectId: string) => get<SyncStatus>(`/projects/${projectId}/sync/status`),
