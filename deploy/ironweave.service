@@ -1,0 +1,17 @@
+[Unit]
+Description=Ironweave Agent Orchestrator
+After=network.target
+
+[Service]
+Type=simple
+User=paddy
+WorkingDirectory=/home/paddy/ironweave
+ExecStart=/home/paddy/ironweave/target/release/ironweave
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+Environment=TERM=xterm-256color
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

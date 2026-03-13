@@ -1,0 +1,12 @@
+/target
+data/
+.worktrees/
+certs/
+node_modules/
+frontend/dist/
+ironweave.toml
+ironweave.db
+mounts/
+test-projects/
+.playwright-mcp/
+.DS_Store

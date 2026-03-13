@@ -1,0 +1,16 @@
+host = "0.0.0.0"
+port = 443
+database_path = "data/ironweave.db"
+data_dir = "data"
+
+[tls]
+cert_path = "/home/paddy/ironweave/certs/cert.pem"
+key_path = "/home/paddy/ironweave/certs/key.pem"
+
+[security]
+master_key = "GENERATE_WITH_openssl_rand_-base64_32"
+
+[filesystem]
+browse_roots = ["/home/paddy"]
+mount_base = "/home/paddy/ironweave/mounts"
+idle_unmount_minutes = 30

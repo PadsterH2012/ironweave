@@ -1,0 +1,147 @@
+<script lang="ts">
+  import { dashboard, agents, type AgentSession, type DashboardStats } from '../lib/api';
+
+  let stats: DashboardStats | null = $state(null);
+  let agentSessions: AgentSession[] = $state([]);
+  let error: string | null = $state(null);
+
+  async function fetchAll() {
+    try {
+      const [dashStats, agentIds] = await Promise.all([
+        dashboard.stats(),
+        agents.list(),
+      ]);
+      stats = dashStats;
+
+      if (agentIds.length > 0) {
+        const sessions = await Promise.all(agentIds.map((id) => agents.get(id)));
+        agentSessions = sessions;
+      } else {
+        agentSessions = [];
+      }
+      error = null;
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to fetch dashboard data';
+    }
+  }
+
+  $effect(() => {
+    fetchAll();
+    const interval = setInterval(fetchAll, 5000);
+    return () => clearInterval(interval);
+  });
+
+  function truncateId(id: string): string {
+    return id.length > 8 ? id.slice(0, 8) : id;
+  }
+
+  function runtimeColor(runtime: string): string {
+    switch (runtime.toLowerCase()) {
+      case 'claude': return 'bg-purple-600 text-purple-100';
+      case 'opencode': return 'bg-blue-600 text-blue-100';
+      case 'gemini': return 'bg-green-600 text-green-100';
+      default: return 'bg-gray-600 text-gray-100';
+    }
+  }
+
+  function stateColor(state: string): string {
+    switch (state.toLowerCase()) {
+      case 'idle': return 'bg-gray-400';
+      case 'working': return 'bg-green-400 animate-pulse';
+      case 'blocked': return 'bg-yellow-400';
+      case 'crashed': return 'bg-red-500';
+      default: return 'bg-gray-400';
+    }
+  }
+
+  function timeAgo(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const secs = Math.floor(diff / 1000);
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs}h ago`;
+  }
+
+  const statCards = $derived([
+    { label: 'Active Agents', value: stats?.active_agents ?? 0, accent: 'text-purple-400' },
+    { label: 'Projects', value: stats?.project_count ?? 0, accent: 'text-blue-400' },
+    { label: 'Open Issues', value: stats?.open_issues ?? 0, accent: 'text-yellow-400' },
+    { label: 'Running Workflows', value: stats?.running_workflows ?? 0, accent: 'text-green-400' },
+  ]);
+</script>
+
+<div class="space-y-8">
+  <!-- Header -->
+  <div>
+    <h1 class="text-2xl font-bold text-white">Dashboard</h1>
+    <p class="mt-1 text-sm text-gray-400">Overview of projects, agents, and workflows.</p>
+  </div>
+
+  <!-- Error banner -->
+  {#if error}
+    <div class="rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-red-300 text-sm">
+      {error}
+    </div>
+  {/if}
+
+  <!-- Summary stats -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    {#each statCards as card}
+      <div class="rounded-xl bg-gray-900 border border-gray-800 p-5">
+        <p class="text-sm font-medium text-gray-400">{card.label}</p>
+        <p class="mt-2 text-3xl font-bold {card.accent}">{card.value}</p>
+      </div>
+    {/each}
+  </div>
+
+  <!-- Active agents -->
+  <div>
+    <h2 class="text-lg font-semibold text-white mb-4">Active Agents</h2>
+
+    {#if agentSessions.length === 0}
+      <div class="rounded-xl bg-gray-900 border border-gray-800 p-8 text-center text-gray-500">
+        No active agent sessions.
+      </div>
+    {:else}
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {#each agentSessions as agent (agent.id)}
+          <div class="rounded-xl bg-gray-900 border border-gray-800 p-4 space-y-3">
+            <!-- Top row: ID + runtime badge -->
+            <div class="flex items-center justify-between">
+              <span class="font-mono text-sm text-gray-200" title={agent.id}>
+                {truncateId(agent.id)}
+              </span>
+              <span class="text-xs font-medium px-2 py-0.5 rounded-full {runtimeColor(agent.runtime)}">
+                {agent.runtime}
+              </span>
+            </div>
+
+            <!-- State -->
+            <div class="flex items-center gap-2">
+              <span class="inline-block h-2.5 w-2.5 rounded-full {stateColor(agent.state)}"></span>
+              <span class="text-sm text-gray-300 capitalize">{agent.state}</span>
+            </div>
+
+            <!-- Task -->
+            <div class="text-xs text-gray-500">
+              {#if agent.claimed_task_id}
+                <span class="text-gray-400">Task:</span>
+                <span class="font-mono text-gray-300 ml-1">{truncateId(agent.claimed_task_id)}</span>
+              {:else}
+                <span class="italic">No task claimed</span>
+              {/if}
+            </div>
+
+            <!-- Footer: heartbeat + cost -->
+            <div class="flex items-center justify-between text-xs text-gray-500 pt-1 border-t border-gray-800">
+              <span title={agent.last_heartbeat}>{timeAgo(agent.last_heartbeat)}</span>
+              <span>${agent.cost.toFixed(4)}</span>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
+</div>

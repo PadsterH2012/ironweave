@@ -1,0 +1,3 @@
+# /etc/sudoers.d/ironweave
+# Allows ironweave service to mount/unmount filesystems
+paddy ALL=(root) NOPASSWD: /usr/bin/mount, /usr/bin/umount

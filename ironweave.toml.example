@@ -1,0 +1,17 @@
+# Ironweave Configuration
+host = "0.0.0.0"
+port = 443
+database_path = "/home/paddy/ironweave/data/ironweave.db"
+data_dir = "/home/paddy/ironweave/data"
+
+[tls]
+cert_path = "/home/paddy/ironweave/certs/cert.pem"
+key_path = "/home/paddy/ironweave/certs/key.pem"
+
+[auth]
+session_ttl_hours = 24
+
+[[auth.users]]
+username = "admin"
+# Generate hash with: cargo run -- hash-password
+password_hash = "$argon2id$v=19$m=19456,t=2,p=1$..."

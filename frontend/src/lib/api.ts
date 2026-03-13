@@ -1,0 +1,639 @@
+const BASE = '/api';
+
+// ── Auth token helpers ───────────────────────────────────────────
+
+function getToken(): string | null {
+  return localStorage.getItem('ironweave_token');
+}
+
+function setToken(token: string): void {
+  localStorage.setItem('ironweave_token', token);
+}
+
+function clearToken(): void {
+  localStorage.removeItem('ironweave_token');
+}
+
+export function authHeaders(): Record<string, string> {
+  const token = getToken();
+  if (token) {
+    return { 'Authorization': `Bearer ${token}` };
+  }
+  return {};
+}
+
+function handle401(res: Response): void {
+  if (res.status === 401) {
+    clearToken();
+    window.location.hash = '#/login';
+  }
+}
+
+// ── Type definitions ─────────────────────────────────────────────
+
+export interface AppStatus {
+  id: string | null;
+  state: string;
+  port: number | null;
+  url: string | null;
+  run_command: string | null;
+  last_error: string | null;
+  started_at: string | null;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  directory: string;
+  context: string;
+  description: string | null;
+  obsidian_vault_path: string | null;
+  obsidian_project: string | null;
+  git_remote: string | null;
+  mount_id: string | null;
+  sync_path: string | null;
+  last_synced_at: string | null;
+  app_url: string | null;
+  sync_state: string;
+  created_at: string;
+}
+
+export interface CreateProject {
+  name: string;
+  directory: string;
+  context: string;
+  obsidian_vault_path?: string;
+  obsidian_project?: string;
+  git_remote?: string;
+  mount_id?: string;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  project_id: string;
+  coordination_mode: string;
+  max_agents: number;
+  token_budget: number | null;
+  cost_budget_daily: number | null;
+  is_template: boolean;
+  auto_pickup_types: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface CreateTeam {
+  name: string;
+  project_id: string;
+  coordination_mode?: string;
+  max_agents?: number;
+  token_budget?: number;
+  cost_budget_daily?: number;
+  is_template?: boolean;
+}
+
+export interface TeamAgentSlot {
+  id: string;
+  team_id: string;
+  role: string;
+  runtime: string;
+  model: string | null;
+  config: string;
+  slot_order: number;
+}
+
+export interface CreateTeamAgentSlot {
+  role: string;
+  runtime: string;
+  model?: string;
+  config?: string;
+  slot_order?: number;
+}
+
+export interface UpdateTeamAgentSlot {
+  role?: string;
+  runtime?: string;
+  model?: string | null;
+  slot_order?: number;
+}
+
+export interface TeamStatus {
+  team_id: string;
+  is_active: boolean;
+  auto_pickup_types: string[];
+  roles: {
+    role: string;
+    slot_count: number;
+    running: number;
+    runtime: string;
+    model: string | null;
+  }[];
+}
+
+export const RUNTIME_MODELS: Record<string, string[]> = {
+  claude: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5-20251001'],
+  opencode: [],
+  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+};
+
+export const PREDEFINED_ROLES: string[] = [
+  'Architect',
+  'Senior Coder',
+  'DB Senior Engineer',
+  'UI/UX Senior Coder',
+  'Senior Tester',
+  'Security Engineer',
+  'DevOps Engineer',
+  'Infrastructure Engineer',
+  'Researcher',
+  'Documentor',
+  'Office Monkey',
+];
+
+export interface Issue {
+  id: string;
+  project_id: string;
+  type: string;
+  title: string;
+  description: string;
+  status: string;
+  priority: number;
+  claimed_by: string | null;
+  claimed_at: string | null;
+  depends_on: string;
+  summary: string | null;
+  workflow_instance_id: string | null;
+  stage_id: string | null;
+  role: string | null;
+  parent_id: string | null;
+  needs_intake: number;
+  scope_mode: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateIssue {
+  project_id: string;
+  issue_type?: string;
+  title: string;
+  description?: string;
+  priority?: number;
+  depends_on?: string[];
+  workflow_instance_id?: string;
+  stage_id?: string;
+  role?: string;
+  parent_id?: string;
+  needs_intake?: number;
+  scope_mode?: string;
+}
+
+export interface UpdateIssue {
+  status?: string;
+  title?: string;
+  description?: string;
+  summary?: string;
+  priority?: number;
+  role?: string;
+  needs_intake?: number;
+  scope_mode?: string;
+}
+
+export interface Attachment {
+  id: string;
+  issue_id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface AgentInfo {
+  id: string;
+  runtime: string;
+  state: string;
+}
+
+export interface SpawnAgentRequest {
+  runtime: string;
+  working_directory: string;
+  prompt: string;
+  env?: Record<string, string>;
+}
+
+export interface WorkflowDefinition {
+  id: string;
+  name: string;
+  project_id: string;
+  team_id: string;
+  dag: string;
+  version: number;
+  git_sha: string | null;
+  created_at: string;
+}
+
+export interface CreateWorkflowDef {
+  name: string;
+  project_id: string;
+  team_id: string;
+  dag?: string;
+  version?: number;
+  git_sha?: string;
+}
+
+export interface WorkflowInstance {
+  id: string;
+  definition_id: string;
+  state: string;
+  current_stage: string | null;
+  checkpoint: string;
+  started_at: string | null;
+  completed_at: string | null;
+  total_tokens: number;
+  total_cost: number;
+  created_at: string;
+}
+
+export interface CreateInstance {
+  definition_id: string;
+  current_stage?: string;
+}
+
+export interface DashboardStats {
+  project_count: number;
+  active_agents: number;
+  open_issues: number;
+  running_workflows: number;
+}
+
+export interface BrowseEntry {
+  name: string;
+  type: 'directory' | 'file';
+}
+
+export interface BrowseResponse {
+  path: string;
+  parent: string | null;
+  entries: BrowseEntry[];
+}
+
+export interface MountConfig {
+  id: string;
+  name: string;
+  mount_type: 'nfs' | 'smb' | 'sshfs';
+  remote_path: string;
+  local_mount_point: string;
+  username: string | null;
+  password: string | null;
+  ssh_key: string | null;
+  mount_options: string | null;
+  auto_mount: boolean;
+  proxy_config_id: string | null;
+  git_remote: string | null;
+  state: 'mounted' | 'unmounted' | 'error';
+  last_error: string | null;
+  created_at: string;
+}
+
+export interface CreateMountConfig {
+  name: string;
+  mount_type: 'nfs' | 'smb' | 'sshfs';
+  remote_path: string;
+  local_mount_point: string;
+  username?: string;
+  password?: string;
+  ssh_key?: string;
+  mount_options?: string;
+  auto_mount?: boolean;
+  proxy_config_id?: string;
+  git_remote?: string;
+}
+
+export interface Setting {
+  key: string;
+  value: string;
+  category: string;
+  updated_at: string;
+}
+
+export interface UpsertSetting {
+  value: string;
+  category?: string;
+}
+
+export interface ProxyHop {
+  host: string;
+  port: number;
+  username: string;
+  auth_type: 'key' | 'password';
+  credential: string | null;
+}
+
+export interface ProxyConfigResponse {
+  id: string;
+  name: string;
+  hops: ProxyHop[];
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface CreateProxyConfig {
+  name: string;
+  hops: ProxyHop[];
+}
+
+export interface UpdateProxyConfig {
+  name?: string;
+  hops?: ProxyHop[];
+  is_active?: boolean;
+}
+
+export interface TestConnectionResult {
+  success: boolean;
+  hops_tested?: number;
+  failed_hop?: number;
+  message?: string;
+  error?: string;
+}
+
+export interface UpdateProject {
+  name?: string;
+  directory?: string;
+  context?: string;
+  description?: string;
+  obsidian_vault_path?: string;
+  obsidian_project?: string;
+  git_remote?: string;
+  mount_id?: string;
+  app_url?: string;
+}
+
+export interface SyncStatus {
+  sync_state: string;
+  last_synced_at: string | null;
+  sync_path: string | null;
+  source: string;
+}
+
+export interface SyncSnapshot {
+  change_id: string;
+  description: string;
+  timestamp: string;
+}
+
+// ── Generic fetch helpers ────────────────────────────────────────
+
+async function get<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { ...authHeaders() },
+  });
+  if (!res.ok) {
+    handle401(res);
+    throw new Error(`GET ${path} failed: ${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    handle401(res);
+    throw new Error(`POST ${path} failed: ${res.status} ${res.statusText}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : (undefined as unknown as T);
+}
+
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    handle401(res);
+    throw new Error(`PATCH ${path} failed: ${res.status} ${res.statusText}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : (undefined as unknown as T);
+}
+
+async function put<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    handle401(res);
+    throw new Error(`PUT ${path} failed: ${res.status} ${res.statusText}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : (undefined as unknown as T);
+}
+
+async function del(path: string): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'DELETE',
+    headers: { ...authHeaders() },
+  });
+  if (!res.ok) {
+    handle401(res);
+    throw new Error(`DELETE ${path} failed: ${res.status} ${res.statusText}`);
+  }
+}
+
+// ── Auth API ─────────────────────────────────────────────────────
+
+export const auth = {
+  login: async (username: string, password: string): Promise<string> => {
+    const res = await fetch(`${BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) {
+      throw new Error('Invalid username or password');
+    }
+    const data = await res.json();
+    setToken(data.token);
+    return data.token;
+  },
+  logout: async (): Promise<void> => {
+    try {
+      await fetch(`${BASE}/auth/logout`, {
+        method: 'POST',
+        headers: { ...authHeaders() },
+      });
+    } finally {
+      clearToken();
+      window.location.hash = '#/login';
+    }
+  },
+  isAuthenticated: (): boolean => {
+    return getToken() !== null;
+  },
+  getToken,
+};
+
+// ── Resource APIs ────────────────────────────────────────────────
+
+export const projects = {
+  list: () => get<Project[]>('/projects'),
+  get: (id: string) => get<Project>(`/projects/${id}`),
+  create: (data: CreateProject) => post<Project>('/projects', data),
+  update: (id: string, data: UpdateProject) => put<Project>(`/projects/${id}`, data),
+  delete: (id: string) => del(`/projects/${id}`),
+};
+
+export const projectApps = {
+  start: (projectId: string) => post<AppStatus>(`/projects/${projectId}/app/start`, {}),
+  stop: (projectId: string) => post<void>(`/projects/${projectId}/app/stop`, {}),
+  status: (projectId: string) => get<AppStatus>(`/projects/${projectId}/app/status`),
+};
+
+export const teams = {
+  list: (projectId: string) => get<Team[]>(`/projects/${projectId}/teams`),
+  get: (projectId: string, id: string) => get<Team>(`/projects/${projectId}/teams/${id}`),
+  create: (projectId: string, data: CreateTeam) => post<Team>(`/projects/${projectId}/teams`, data),
+  delete: (projectId: string, id: string) => del(`/projects/${projectId}/teams/${id}`),
+  templates: () => get<Team[]>('/teams/templates'),
+  projectTemplates: (projectId: string) => get<Team[]>(`/projects/${projectId}/teams/templates`),
+  cloneTemplate: (projectId: string, templateId: string) => post<Team>(`/projects/${projectId}/teams/from-template/${templateId}`, {}),
+  activate: (projectId: string, id: string) => put<Team>(`/projects/${projectId}/teams/${id}/activate`, {}),
+  deactivate: (projectId: string, id: string) => put<Team>(`/projects/${projectId}/teams/${id}/deactivate`, {}),
+  updateConfig: (projectId: string, id: string, types: string[]) => put<Team>(`/projects/${projectId}/teams/${id}/config`, { types }),
+  status: (projectId: string, id: string) => get<TeamStatus>(`/projects/${projectId}/teams/${id}/status`),
+  slots: {
+    list: (teamId: string) => get<TeamAgentSlot[]>(`/teams/${teamId}/slots`),
+    create: (teamId: string, data: CreateTeamAgentSlot) => post<TeamAgentSlot>(`/teams/${teamId}/slots`, data),
+    update: (teamId: string, id: string, data: UpdateTeamAgentSlot) => put<TeamAgentSlot>(`/teams/${teamId}/slots/${id}`, data),
+    delete: (teamId: string, id: string) => del(`/teams/${teamId}/slots/${id}`),
+  },
+};
+
+export const issues = {
+  list: (projectId: string) => get<Issue[]>(`/projects/${projectId}/issues`),
+  get: (projectId: string, id: string) => get<Issue>(`/projects/${projectId}/issues/${id}`),
+  create: (projectId: string, data: CreateIssue) => post<Issue>(`/projects/${projectId}/issues`, data),
+  update: (projectId: string, id: string, data: UpdateIssue) => patch<Issue>(`/projects/${projectId}/issues/${id}`, data),
+  claim: (projectId: string, id: string, agentId: string) => post<void>(`/projects/${projectId}/issues/${id}/claim`, { agent_id: agentId }),
+  unclaim: (projectId: string, id: string) => post<void>(`/projects/${projectId}/issues/${id}/unclaim`, {}),
+  ready: (projectId: string) => get<Issue[]>(`/projects/${projectId}/issues/ready`),
+  delete: (projectId: string, id: string) => del(`/projects/${projectId}/issues/${id}`),
+  updateStatus: (projectId: string, id: string, status: string) => patch<Issue>(`/projects/${projectId}/issues/${id}`, { status }),
+  attachments: {
+    list: (projectId: string, issueId: string) =>
+      get<Attachment[]>(`/projects/${projectId}/issues/${issueId}/attachments`),
+    upload: async (projectId: string, issueId: string, file: File): Promise<Attachment> => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${BASE}/projects/${projectId}/issues/${issueId}/attachments`, {
+        method: 'POST',
+        headers: { ...authHeaders() },
+        body: form,
+      });
+      if (!res.ok) {
+        handle401(res);
+        throw new Error(`Upload failed: ${res.status}`);
+      }
+      return res.json();
+    },
+    downloadUrl: (attachmentId: string) => `${BASE}/attachments/${attachmentId}/download`,
+  },
+};
+
+export const agents = {
+  list: () => get<AgentInfo[]>('/agents'),
+  get: (id: string) => get<AgentInfo>(`/agents/${id}`),
+  spawn: (data: SpawnAgentRequest) => post<AgentInfo>('/agents/spawn', data),
+  stop: (id: string) => post<void>(`/agents/${id}/stop`, {}),
+};
+
+export const workflows = {
+  definitions: {
+    list: (projectId: string) => get<WorkflowDefinition[]>(`/projects/${projectId}/workflows`),
+    get: (projectId: string, id: string) => get<WorkflowDefinition>(`/projects/${projectId}/workflows/${id}`),
+    create: (projectId: string, data: CreateWorkflowDef) => post<WorkflowDefinition>(`/projects/${projectId}/workflows`, data),
+  },
+  instances: {
+    list: (workflowId: string) => get<WorkflowInstance[]>(`/workflows/${workflowId}/instances`),
+    create: (workflowId: string, data: CreateInstance) => post<WorkflowInstance>(`/workflows/${workflowId}/instances`, data),
+  },
+};
+
+export const dashboard = {
+  stats: () => get<DashboardStats>('/dashboard'),
+};
+
+export const filesystem = {
+  browse: (path: string, includeFiles = false) =>
+    get<BrowseResponse>(`/filesystem/browse?path=${encodeURIComponent(path)}&include_files=${includeFiles}`),
+};
+
+export interface SshTestRequest {
+  host: string;
+  port?: number;
+  username: string;
+  password?: string;
+  ssh_key?: string;
+  proxy_config_id?: string;
+}
+
+export interface RemoteBrowseRequest extends SshTestRequest {
+  path?: string;
+}
+
+export interface RemoteBrowseResponse {
+  path: string;
+  entries: Array<{ name: string; type: 'directory' | 'file' }>;
+  git_remote: string | null;
+  error?: string;
+}
+
+export const mounts = {
+  list: () => get<MountConfig[]>('/mounts'),
+  get: (id: string) => get<MountConfig>(`/mounts/${id}`),
+  create: (data: CreateMountConfig) => post<MountConfig>('/mounts', data),
+  update: (id: string, data: CreateMountConfig) => put<MountConfig>(`/mounts/${id}`, data),
+  delete: (id: string) => del(`/mounts/${id}`),
+  duplicate: (id: string) => post<MountConfig>(`/mounts/${id}/duplicate`, {}),
+  mount: (id: string) => post<MountConfig>(`/mounts/${id}/mount`, {}),
+  unmount: (id: string) => post<MountConfig>(`/mounts/${id}/unmount`, {}),
+  status: (id: string) => get<{ status: string }>(`/mounts/${id}/status`),
+  testSsh: (data: SshTestRequest) => post<{ success: boolean; message?: string; error?: string }>('/mounts/test-ssh', data),
+  browseRemote: (data: RemoteBrowseRequest) => post<RemoteBrowseResponse>('/mounts/browse-remote', data),
+};
+
+export const settings = {
+  list: () => get<Setting[]>('/settings'),
+  get: (key: string) => get<Setting>(`/settings/${key}`),
+  upsert: (key: string, data: UpsertSetting) => put<Setting>(`/settings/${key}`, data),
+  delete: (key: string) => del(`/settings/${key}`),
+};
+
+export const proxyConfigs = {
+  list: () => get<ProxyConfigResponse[]>('/proxy-configs'),
+  get: (id: string) => get<ProxyConfigResponse>(`/proxy-configs/${id}`),
+  create: (data: CreateProxyConfig) => post<ProxyConfigResponse>('/proxy-configs', data),
+  update: (id: string, data: UpdateProxyConfig) => put<ProxyConfigResponse>(`/proxy-configs/${id}`, data),
+  delete: (id: string) => del(`/proxy-configs/${id}`),
+  test: (id: string) => post<TestConnectionResult>(`/proxy-configs/${id}/test`, {}),
+};
+
+export const sync = {
+  trigger: (projectId: string) => post<SyncStatus>(`/projects/${projectId}/sync`, {}),
+  status: (projectId: string) => get<SyncStatus>(`/projects/${projectId}/sync/status`),
+  history: (projectId: string) => get<SyncSnapshot[]>(`/projects/${projectId}/sync/history`),
+  diff: (projectId: string, changeId: string) => get<string>(`/projects/${projectId}/sync/diff/${changeId}`),
+  restore: (projectId: string, changeId: string) => post<void>(`/projects/${projectId}/sync/restore`, { change_id: changeId }),
+  browseFiles: (projectId: string, path?: string) =>
+    get<BrowseEntry[]>(`/projects/${projectId}/files${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  readFile: (projectId: string, path: string) =>
+    get<string>(`/projects/${projectId}/files/content?path=${encodeURIComponent(path)}`),
+};
+
+
