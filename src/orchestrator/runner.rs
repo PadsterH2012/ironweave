@@ -123,6 +123,26 @@ impl OrchestratorRunner {
         }
     }
 
+    // ── Activity logging helper ──────────────────────────────────────
+
+    fn log_activity(&self, event_type: &str, message: &str,
+                    project_id: Option<&str>, team_id: Option<&str>,
+                    agent_id: Option<&str>, issue_id: Option<&str>,
+                    workflow_instance_id: Option<&str>) {
+        use crate::models::activity_log::{ActivityLogEntry, LogEvent};
+        let conn = self.db.lock().unwrap();
+        let _ = ActivityLogEntry::log(&conn, &LogEvent {
+            event_type: event_type.to_string(),
+            project_id: project_id.map(|s| s.to_string()),
+            team_id: team_id.map(|s| s.to_string()),
+            agent_id: agent_id.map(|s| s.to_string()),
+            issue_id: issue_id.map(|s| s.to_string()),
+            workflow_instance_id: workflow_instance_id.map(|s| s.to_string()),
+            message: message.to_string(),
+            metadata: None,
+        });
+    }
+
     // ── Startup recovery (Task 13) ──────────────────────────────────
 
     pub async fn restore_running_instances(&mut self) {
@@ -246,6 +266,7 @@ impl OrchestratorRunner {
         let checkpoint = serde_json::to_value(&run_state.execution)?;
         run_state.state_machine.checkpoint(checkpoint)?;
 
+        self.log_activity("workflow_started", "Workflow started", Some(&run_state.project_id), None, None, None, Some(&instance_id));
         self.active_workflows.insert(instance_id, run_state);
         Ok(())
     }
@@ -645,6 +666,20 @@ impl OrchestratorRunner {
                     team = %ta.team_id, role = %ta.role, issue = %ta.issue_id,
                     "Team agent completed issue"
                 );
+                {
+                    use crate::models::activity_log::{ActivityLogEntry, LogEvent};
+                    let conn = self.db.lock().unwrap();
+                    let _ = ActivityLogEntry::log(&conn, &LogEvent {
+                        event_type: "agent_completed".to_string(),
+                        project_id: None,
+                        team_id: Some(ta.team_id.clone()),
+                        agent_id: Some(ta.agent_session_id.clone()),
+                        issue_id: Some(ta.issue_id.clone()),
+                        workflow_instance_id: None,
+                        message: "Agent completed work".to_string(),
+                        metadata: None,
+                    });
+                }
                 to_remove.push(key.clone());
                 continue;
             }
@@ -868,6 +903,7 @@ impl OrchestratorRunner {
             let conn = self.db.lock().unwrap();
             Issue::claim(&conn, &issue.id, &session.id)?;
         }
+        self.log_activity("issue_claimed", &format!("Issue '{}' claimed", issue.title), Some(&team.project_id), Some(&team.id), Some(&session.id), Some(&issue.id), None);
 
         // Build prompt with role, task details, and curl instructions
         let description = &issue.description;
@@ -944,6 +980,7 @@ impl OrchestratorRunner {
         }
 
         // Track in team_agents HashMap
+        self.log_activity("agent_spawned", &format!("Agent spawned for role '{}'", slot.role), Some(&team.project_id), Some(&team.id), Some(&session.id), Some(&issue.id), None);
         tracing::info!(
             team = %team.id, role = %slot.role, issue = %issue.id,
             session = %session.id, "Spawned team agent"
