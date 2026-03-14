@@ -13,7 +13,7 @@ impl RuntimeAdapter for OpenCodeAdapter {
     }
 
     fn binary(&self) -> &str {
-        "opencode"
+        "/home/paddy/.opencode/bin/opencode"
     }
 
     fn capabilities(&self) -> RuntimeCapabilities {
@@ -25,8 +25,25 @@ impl RuntimeAdapter for OpenCodeAdapter {
             dangerously_skip_permissions: false,
             non_interactive: true,
             supported_models: vec![
-                "claude-sonnet-4-6".into(),
-                "gpt-4o".into(),
+                // Free built-in models
+                "opencode/gpt-5-nano".into(),
+                "opencode/mimo-v2-flash-free".into(),
+                // Ollama (local — 12GB GPU, keep models ≤8B)
+                "ollama/qwen3:8b".into(),
+                "ollama/qwen2.5:7b".into(),
+                "ollama/gemma3:4b".into(),
+                "ollama/llama3.1:8b".into(),
+                // OpenRouter
+                "openrouter/anthropic/claude-sonnet-4".into(),
+                "openrouter/google/gemini-2.5-pro".into(),
+                "openrouter/meta-llama/llama-4-scout".into(),
+                "openrouter/deepseek/deepseek-r1".into(),
+                // Anthropic direct
+                "anthropic/claude-sonnet-4-6".into(),
+                "anthropic/claude-haiku-4-5-20251001".into(),
+                // Google direct
+                "google/gemini-2.5-pro".into(),
+                "google/gemini-2.5-flash".into(),
             ],
         }
     }
@@ -41,13 +58,18 @@ impl RuntimeAdapter for OpenCodeAdapter {
     }
 
     fn build_command(&self, config: &AgentConfig) -> CommandBuilder {
-        let mut cmd = CommandBuilder::new(self.binary());
-        cmd.arg("--non-interactive");
+        // Use script(1) to create a real PTY — bun binaries crash under portable_pty
+        let mut cmd = CommandBuilder::new("/usr/bin/script");
+        cmd.arg("-qc");
+        let dir = config.working_directory.to_string_lossy();
+        let prompt = config.prompt.replace('\'', "'\\''");
+        let mut inner = format!("{} run", self.binary());
         if let Some(ref model) = config.model {
-            cmd.arg("--model");
-            cmd.arg(model);
+            inner.push_str(&format!(" --model '{}'", model));
         }
-        cmd.arg(&config.prompt);
+        inner.push_str(&format!(" --dir '{}' '{}'", dir, prompt));
+        cmd.arg(&inner);
+        cmd.arg("/dev/null");
         cmd.cwd(&config.working_directory);
         for (k, v) in config.merged_env() {
             cmd.env(k, v);

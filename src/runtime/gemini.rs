@@ -13,7 +13,7 @@ impl RuntimeAdapter for GeminiAdapter {
     }
 
     fn binary(&self) -> &str {
-        "gemini"
+        "/home/paddy/.npm-global/bin/gemini"
     }
 
     fn capabilities(&self) -> RuntimeCapabilities {
@@ -23,7 +23,7 @@ impl RuntimeAdapter for GeminiAdapter {
             model_selection: true,
             allowed_tools_filter: false,
             dangerously_skip_permissions: false,
-            non_interactive: false,
+            non_interactive: true,
             supported_models: vec![
                 "gemini-2.5-pro".into(),
                 "gemini-2.5-flash".into(),
@@ -42,11 +42,14 @@ impl RuntimeAdapter for GeminiAdapter {
 
     fn build_command(&self, config: &AgentConfig) -> CommandBuilder {
         let mut cmd = CommandBuilder::new(self.binary());
+        // Non-interactive headless mode with auto-approve
+        cmd.arg("-p");
+        cmd.arg(&config.prompt);
+        cmd.arg("-y"); // YOLO mode — auto-approve all tool use
         if let Some(ref model) = config.model {
             cmd.arg("--model");
             cmd.arg(model);
         }
-        cmd.arg(&config.prompt);
         cmd.cwd(&config.working_directory);
         for (k, v) in config.merged_env() {
             cmd.env(k, v);

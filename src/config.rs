@@ -33,6 +33,16 @@ impl Default for FilesystemConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct BuildServerConfig {
+    /// SSH destination for the build server (e.g. "paddy@10.202.28.171")
+    pub ssh_target: String,
+    /// Path to the source directory on the build server
+    pub remote_source_dir: String,
+    /// Local source directory to rsync from (defaults to project directory)
+    pub local_source_dir: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct Config {
     pub host: String,
     pub port: u16,
@@ -42,6 +52,7 @@ pub struct Config {
     pub auth: Option<AuthConfig>,
     pub security: Option<SecurityConfig>,
     pub filesystem: Option<FilesystemConfig>,
+    pub build_server: Option<BuildServerConfig>,
 }
 
 impl Default for Config {
@@ -55,6 +66,7 @@ impl Default for Config {
             auth: None,
             security: None,
             filesystem: None,
+            build_server: None,
         }
     }
 }

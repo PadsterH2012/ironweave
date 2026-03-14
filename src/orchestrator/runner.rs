@@ -102,6 +102,7 @@ pub struct OrchestratorRunner {
     /// Tracks active intake agents: project_id -> (session_id, issue_id)
     intake_agents: HashMap<String, (String, String)>,
     worktree_manager: WorktreeManager,
+    build_server: Option<crate::config::BuildServerConfig>,
 }
 
 impl OrchestratorRunner {
@@ -121,7 +122,13 @@ impl OrchestratorRunner {
             team_agents: HashMap::new(),
             intake_agents: HashMap::new(),
             worktree_manager: WorktreeManager::new(worktree_base),
+            build_server: None,
         }
+    }
+
+    pub fn with_build_server(mut self, config: Option<crate::config::BuildServerConfig>) -> Self {
+        self.build_server = config;
+        self
     }
 
     // ── Worktree cleanup helper ──────────────────────────────────────
@@ -438,13 +445,37 @@ impl OrchestratorRunner {
                 let mut env = std::collections::HashMap::new();
                 env.insert("IRONWEAVE_API".to_string(), api_url);
                 env.insert("TERM".to_string(), "xterm-256color".to_string());
+                // Inject API keys from settings for non-Claude runtimes
+                {
+                    let conn = db.lock().unwrap();
+                    let key_mappings = [
+                        ("gemini_api_key", "GEMINI_API_KEY"),
+                        ("google_api_key", "GOOGLE_API_KEY"),
+                        ("apikey_openrouter_api_key", "OPENROUTER_API_KEY"),
+                        ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+                        ("ollama_host", "OLLAMA_HOST"),
+                    ];
+                    for (setting_key, env_var) in &key_mappings {
+                        if let Ok(s) = crate::models::setting::Setting::get_by_key(&conn, setting_key) {
+                            if !s.value.is_empty() {
+                                env.insert(env_var.to_string(), s.value);
+                            }
+                        }
+                    }
+                }
+                // Ensure PATH includes runtime binary locations
+                let path = std::env::var("PATH").unwrap_or_default();
+                env.insert("PATH".to_string(), format!(
+                    "/home/paddy/.opencode/bin:/home/paddy/.npm-global/bin:/home/paddy/.cargo/bin:{}",
+                    path
+                ));
                 Some(env)
             },
             allowed_tools: None,
             skills: None,
             extra_args: Some(vec!["--print".to_string()]),
             playwright_env: None,
-            model: stage.model.clone(),
+            model: None,
         };
 
         let size = PtySize {
@@ -780,25 +811,16 @@ impl OrchestratorRunner {
                 {
                     let conn = self.db.lock().unwrap();
                     if let Ok(session) = AgentSession::get_by_id(&conn, &ta.agent_session_id) {
-                        if let (Some(branch), Some(wt_path)) = (&session.branch, &session.worktree_path) {
+                        if let (Some(branch), Some(_wt_path)) = (&session.branch, &session.worktree_path) {
                             let merge_id = uuid::Uuid::new_v4().to_string();
                             let project_id_for_merge = Team::get_by_id(&conn, &ta.team_id)
                                 .map(|t| t.project_id)
                                 .unwrap_or_default();
-                            // Detect target branch from the project's repo
-                            let target = if !project_id_for_merge.is_empty() {
-                                Project::get_by_id(&conn, &project_id_for_merge)
-                                    .ok()
-                                    .and_then(|p| WorktreeManager::detect_default_branch(std::path::Path::new(&p.directory)))
-                                    .unwrap_or_else(|| "main".to_string())
-                            } else {
-                                "main".to_string()
-                            };
                             let _ = conn.execute(
-                                "INSERT INTO merge_queue_entries (id, project_id, agent_session_id, branch, worktree_path, target_branch) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                                rusqlite::params![merge_id, project_id_for_merge, ta.agent_session_id, branch, wt_path, target],
+                                "INSERT INTO merge_queue (id, project_id, branch_name, agent_session_id, issue_id, team_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                                rusqlite::params![merge_id, project_id_for_merge, branch, ta.agent_session_id, ta.issue_id, ta.team_id],
                             );
-                            tracing::info!(branch = %branch, target = %target, "Enqueued branch for merge");
+                            tracing::info!(branch = %branch, "Enqueued branch for merge");
                         }
                     }
                 }
@@ -1366,6 +1388,17 @@ impl OrchestratorRunner {
             agent_id = session.id,
         ));
 
+        // Build restrictions — compilation happens on the build server via merge queue
+        prompt_parts.push(
+            "\n## Build Rules\n\
+            IMPORTANT: Do NOT run `cargo build`, `cargo check`, or `cargo test` yourself.\n\
+            Build verification is handled automatically by the merge queue on a dedicated build server.\n\
+            Your job is to edit code and commit your changes. When you close the issue, \
+            the merge queue will merge your branch and verify it compiles.\n\
+            If you need to check syntax, read the code carefully instead of compiling."
+            .to_string()
+        );
+
         let prompt = prompt_parts.join("\n");
 
         // Build AgentConfig
@@ -1382,6 +1415,30 @@ impl OrchestratorRunner {
                 let mut env = std::collections::HashMap::new();
                 env.insert("IRONWEAVE_API".to_string(), api_url);
                 env.insert("TERM".to_string(), "xterm-256color".to_string());
+                // Inject API keys from settings for non-Claude runtimes
+                {
+                    let conn = self.db.lock().unwrap();
+                    let key_mappings = [
+                        ("gemini_api_key", "GEMINI_API_KEY"),
+                        ("google_api_key", "GOOGLE_API_KEY"),
+                        ("apikey_openrouter_api_key", "OPENROUTER_API_KEY"),
+                        ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+                        ("ollama_host", "OLLAMA_HOST"),
+                    ];
+                    for (setting_key, env_var) in &key_mappings {
+                        if let Ok(s) = crate::models::setting::Setting::get_by_key(&conn, setting_key) {
+                            if !s.value.is_empty() {
+                                env.insert(env_var.to_string(), s.value);
+                            }
+                        }
+                    }
+                }
+                // Ensure PATH includes runtime binary locations
+                let path = std::env::var("PATH").unwrap_or_default();
+                env.insert("PATH".to_string(), format!(
+                    "/home/paddy/.opencode/bin:/home/paddy/.npm-global/bin:/home/paddy/.cargo/bin:{}",
+                    path
+                ));
                 Some(env)
             },
             allowed_tools: None,
@@ -1707,6 +1764,30 @@ impl OrchestratorRunner {
                 let mut env = std::collections::HashMap::new();
                 env.insert("IRONWEAVE_API".to_string(), api_url);
                 env.insert("TERM".to_string(), "xterm-256color".to_string());
+                // Inject API keys from settings for non-Claude runtimes
+                {
+                    let conn = self.db.lock().unwrap();
+                    let key_mappings = [
+                        ("gemini_api_key", "GEMINI_API_KEY"),
+                        ("google_api_key", "GOOGLE_API_KEY"),
+                        ("apikey_openrouter_api_key", "OPENROUTER_API_KEY"),
+                        ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+                        ("ollama_host", "OLLAMA_HOST"),
+                    ];
+                    for (setting_key, env_var) in &key_mappings {
+                        if let Ok(s) = crate::models::setting::Setting::get_by_key(&conn, setting_key) {
+                            if !s.value.is_empty() {
+                                env.insert(env_var.to_string(), s.value);
+                            }
+                        }
+                    }
+                }
+                // Ensure PATH includes runtime binary locations
+                let path = std::env::var("PATH").unwrap_or_default();
+                env.insert("PATH".to_string(), format!(
+                    "/home/paddy/.opencode/bin:/home/paddy/.npm-global/bin:/home/paddy/.cargo/bin:{}",
+                    path
+                ));
                 Some(env)
             },
             allowed_tools: None,
@@ -1862,24 +1943,85 @@ impl OrchestratorRunner {
             // Step 6: Handle result (re-acquire DB lock)
             match result {
                 Ok(MergeResult::Success) => {
-                    {
-                        let conn = self.db.lock().unwrap();
-                        let _ = MergeQueueEntry::update_status(
-                            &conn, &entry.id, "merged", None, None, None,
+                    // Build verification: if a build server is configured, verify
+                    // the merged code compiles before accepting the merge.
+                    let build_passed = if let Some(ref bs) = self.build_server {
+                        let source_dir = bs.local_source_dir.as_deref()
+                            .unwrap_or(&project_dir);
+                        let source_path = std::path::Path::new(source_dir);
+
+                        {
+                            let conn = self.db.lock().unwrap();
+                            let _ = MergeQueueEntry::update_status(
+                                &conn, &entry.id, "verifying", None, None, None,
+                            );
+                        }
+                        self.log_activity(
+                            "build_verify_start",
+                            &format!("Verifying build for branch '{}' on build server", entry.branch_name),
+                            Some(project_id), entry.team_id.as_deref(),
+                            entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
+                            None,
                         );
+
+                        match MergeQueueProcessor::verify_build(
+                            source_path,
+                            &bs.ssh_target,
+                            &bs.remote_source_dir,
+                        ) {
+                            crate::worktree::merge_queue::BuildVerifyResult::Pass => true,
+                            crate::worktree::merge_queue::BuildVerifyResult::Fail(err) => {
+                                tracing::error!(
+                                    branch = %entry.branch_name,
+                                    "Build verification failed, reverting merge: {}", err
+                                );
+                                // Revert the merge
+                                if let Err(revert_err) = MergeQueueProcessor::revert_merge(
+                                    repo_path, &target_branch,
+                                ) {
+                                    tracing::error!("Failed to revert merge: {}", revert_err);
+                                }
+                                // Mark as build_failed
+                                {
+                                    let conn = self.db.lock().unwrap();
+                                    let _ = MergeQueueEntry::update_status(
+                                        &conn, &entry.id, "build_failed", None, None, Some(&err),
+                                    );
+                                }
+                                self.log_activity(
+                                    "build_verify_failed",
+                                    &format!("Build failed for branch '{}': {}", entry.branch_name, &err[..err.len().min(200)]),
+                                    Some(project_id), entry.team_id.as_deref(),
+                                    entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
+                                    None,
+                                );
+                                false
+                            }
+                        }
+                    } else {
+                        true // No build server configured — skip verification
+                    };
+
+                    if build_passed {
+                        {
+                            let conn = self.db.lock().unwrap();
+                            let _ = MergeQueueEntry::update_status(
+                                &conn, &entry.id, "merged", None, None, None,
+                            );
+                        }
+                        self.log_activity(
+                            "merge_success",
+                            &format!("Merged branch '{}' into '{}'", entry.branch_name, target_branch),
+                            Some(project_id), entry.team_id.as_deref(),
+                            entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
+                            None,
+                        );
+                        let _ = self.worktree_manager.remove_worktree(
+                            repo_path,
+                            &entry.branch_name.replace('/', "-"),
+                        );
+                        tracing::info!(branch = %entry.branch_name, "Merge successful");
                     }
-                    self.log_activity(
-                        "merge_success",
-                        &format!("Merged branch '{}' into '{}'", entry.branch_name, target_branch),
-                        Some(project_id), entry.team_id.as_deref(),
-                        entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
-                        None,
-                    );
-                    let _ = self.worktree_manager.remove_worktree(
-                        repo_path,
-                        &entry.branch_name.replace('/', "-"),
-                    );
-                    tracing::info!(branch = %entry.branch_name, "Merge successful");
                 }
                 Ok(MergeResult::Conflict { files }) => {
                     let conflict_json = serde_json::to_string(&files).unwrap_or_else(|_| "[]".to_string());

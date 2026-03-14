@@ -98,7 +98,7 @@ async fn main() {
         process_manager.clone(),
         registry.clone(),
         worktree_base,
-    );
+    ).with_build_server(config.build_server.clone());
     tokio::spawn(async move {
         orch_runner.restore_running_instances().await;
         orch_runner.run().await;

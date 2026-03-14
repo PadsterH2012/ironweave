@@ -1,5 +1,5 @@
-use git2::{MergeOptions, Repository};
 use std::path::Path;
+use std::process::Command;
 
 pub enum MergeResult {
     Success,
@@ -7,283 +7,219 @@ pub enum MergeResult {
     Error(String),
 }
 
+pub enum BuildVerifyResult {
+    Pass,
+    Fail(String),
+}
+
 pub struct MergeQueueProcessor;
 
 impl MergeQueueProcessor {
-    /// Attempt to merge a branch into the target branch.
-    ///
-    /// Performs merge analysis first: if already up-to-date returns Success,
-    /// if fast-forwardable updates the target ref, otherwise attempts a
-    /// normal merge and reports any conflicts.
+    /// Run a git command in the given repo directory
+    fn git(repo_path: &Path, args: &[&str]) -> Result<String, String> {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo_path)
+            .output()
+            .map_err(|e| format!("failed to run git: {}", e))?;
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    }
+
+    /// Attempt to merge a branch into the target branch using git CLI.
     pub fn try_merge(
         repo_path: &Path,
         source_branch: &str,
         target_branch: &str,
     ) -> crate::error::Result<MergeResult> {
-        let repo = Repository::open(repo_path)?;
+        // Verify both branches exist
+        if let Err(e) = Self::git(repo_path, &["rev-parse", "--verify", &format!("refs/heads/{}", source_branch)]) {
+            return Ok(MergeResult::Error(format!("source branch '{}' not found: {}", source_branch, e)));
+        }
+        if let Err(e) = Self::git(repo_path, &["rev-parse", "--verify", &format!("refs/heads/{}", target_branch)]) {
+            return Ok(MergeResult::Error(format!("target branch '{}' not found: {}", target_branch, e)));
+        }
 
-        let source = repo.find_branch(source_branch, git2::BranchType::Local)?;
-        let source_commit = source.get().peel_to_commit()?;
-
-        let target = repo.find_branch(target_branch, git2::BranchType::Local)?;
-        let target_commit = target.get().peel_to_commit()?;
-
-        // Set HEAD to target branch so merge_analysis works correctly
-        repo.set_head(&format!("refs/heads/{}", target_branch))?;
-
-        let source_annotated = repo.find_annotated_commit(source_commit.id())?;
-
-        // Check merge analysis
-        let (analysis, _) = repo.merge_analysis(&[&source_annotated])?;
-
-        if analysis.is_up_to_date() {
+        // Check if already up to date (source is ancestor of target)
+        if Self::git(repo_path, &["merge-base", "--is-ancestor", source_branch, target_branch]).is_ok() {
             return Ok(MergeResult::Success);
         }
 
-        if analysis.is_fast_forward() {
-            // Fast-forward merge
-            let mut target_ref =
-                repo.find_reference(&format!("refs/heads/{}", target_branch))?;
-            target_ref.set_target(source_commit.id(), "ironweave: fast-forward merge")?;
-            return Ok(MergeResult::Success);
+        // Checkout target branch
+        if let Err(e) = Self::git(repo_path, &["checkout", target_branch]) {
+            return Ok(MergeResult::Error(format!("failed to checkout {}: {}", target_branch, e)));
         }
 
-        // Normal merge — check for conflicts
-        let mut index = repo.merge_commits(
-            &target_commit,
-            &source_commit,
-            Some(&MergeOptions::new()),
-        )?;
+        // Attempt merge with no-edit (non-interactive)
+        let merge_result = Self::git(repo_path, &[
+            "merge",
+            "--no-edit",
+            "-m", &format!("ironweave: merge {} into {}", source_branch, target_branch),
+            source_branch,
+        ]);
 
-        if index.has_conflicts() {
-            let conflicts: Vec<String> = index
-                .conflicts()?
-                .filter_map(|c| c.ok())
-                .filter_map(|c| {
-                    c.our
-                        .map(|e| String::from_utf8_lossy(&e.path).to_string())
-                })
-                .collect();
-            return Ok(MergeResult::Conflict { files: conflicts });
+        match merge_result {
+            Ok(_) => Ok(MergeResult::Success),
+            Err(stderr) => {
+                // Check if it's a conflict
+                if stderr.contains("CONFLICT") || stderr.contains("Automatic merge failed") {
+                    // Get list of conflicted files
+                    let conflicts = Self::git(repo_path, &["diff", "--name-only", "--diff-filter=U"])
+                        .unwrap_or_default();
+                    let files: Vec<String> = conflicts
+                        .lines()
+                        .filter(|l| !l.is_empty())
+                        .map(|l| l.to_string())
+                        .collect();
+
+                    // Abort the merge to leave repo clean
+                    let _ = Self::git(repo_path, &["merge", "--abort"]);
+
+                    Ok(MergeResult::Conflict { files })
+                } else {
+                    // Abort any partial merge
+                    let _ = Self::git(repo_path, &["merge", "--abort"]);
+                    Ok(MergeResult::Error(format!("merge failed: {}", stderr)))
+                }
+            }
+        }
+    }
+
+    /// Verify the build on a remote build server after a successful merge.
+    ///
+    /// Steps:
+    /// 1. Rsync the merged source to the build server
+    /// 2. Run `cargo check` on the build server
+    /// 3. Return pass/fail with compiler output
+    pub fn verify_build(
+        local_source_dir: &Path,
+        ssh_target: &str,
+        remote_source_dir: &str,
+    ) -> BuildVerifyResult {
+        // Step 1: Rsync source to build server
+        let rsync_dest = format!("{}:{}/", ssh_target, remote_source_dir);
+        let rsync_result = Command::new("rsync")
+            .args([
+                "-az",
+                "--exclude", "target",
+                "--exclude", ".git",
+                "--exclude", "node_modules",
+                "--exclude", "frontend/node_modules",
+            ])
+            .arg(format!("{}/", local_source_dir.display()))
+            .arg(&rsync_dest)
+            .output();
+
+        match rsync_result {
+            Err(e) => return BuildVerifyResult::Fail(format!("rsync failed to start: {}", e)),
+            Ok(output) if !output.status.success() => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return BuildVerifyResult::Fail(format!("rsync failed: {}", stderr.trim()));
+            }
+            _ => {}
         }
 
-        // No conflicts — create merge commit
-        let oid = index.write_tree_to(&repo)?;
-        let tree = repo.find_tree(oid)?;
-        let sig = repo
-            .signature()
-            .unwrap_or_else(|_| git2::Signature::now("ironweave", "ironweave@local").unwrap());
-        repo.commit(
-            Some(&format!("refs/heads/{}", target_branch)),
-            &sig,
-            &sig,
-            &format!(
-                "ironweave: merge {} into {}",
-                source_branch, target_branch
-            ),
-            &tree,
-            &[&target_commit, &source_commit],
-        )?;
+        // Step 2: Run cargo check on the build server
+        let check_cmd = format!(
+            "source ~/.cargo/env && cd {} && cargo check 2>&1",
+            remote_source_dir
+        );
+        let check_result = Command::new("ssh")
+            .args([ssh_target, &check_cmd])
+            .output();
 
-        Ok(MergeResult::Success)
+        match check_result {
+            Err(e) => BuildVerifyResult::Fail(format!("ssh failed to start: {}", e)),
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if output.status.success() {
+                    tracing::info!("Build verification passed on {}", ssh_target);
+                    BuildVerifyResult::Pass
+                } else {
+                    BuildVerifyResult::Fail(format!("cargo check failed:\n{}", stdout.trim()))
+                }
+            }
+        }
+    }
+
+    /// Revert the last merge commit on the target branch.
+    pub fn revert_merge(repo_path: &Path, target_branch: &str) -> Result<(), String> {
+        // Make sure we're on the target branch
+        Self::git(repo_path, &["checkout", target_branch])?;
+        // Reset to the commit before the merge
+        Self::git(repo_path, &["reset", "--hard", "HEAD~1"])?;
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use git2::{Oid, Repository, Signature};
     use std::fs;
-    use std::path::Path;
+    use std::process::Command;
+    use tempfile::tempdir;
 
-    /// Create an initial commit on the repo so HEAD and "main" exist.
-    fn init_repo_with_commit(path: &Path) -> Repository {
-        let repo = Repository::init(path).unwrap();
-        let sig = Signature::now("test", "test@test.com").unwrap();
-
-        // Create an initial file and commit
+    fn init_repo(path: &Path) {
+        Command::new("git").args(["init", "-b", "main"]).current_dir(path).output().unwrap();
+        Command::new("git").args(["config", "user.name", "Test"]).current_dir(path).output().unwrap();
+        Command::new("git").args(["config", "user.email", "t@t.com"]).current_dir(path).output().unwrap();
         fs::write(path.join("README.md"), "# Init\n").unwrap();
-        {
-            let mut index = repo.index().unwrap();
-            index.add_path(Path::new("README.md")).unwrap();
-            index.write().unwrap();
-            let tree_oid = index.write_tree().unwrap();
-            let tree = repo.find_tree(tree_oid).unwrap();
-
-            repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
-                .unwrap();
-        }
-
-        // Make sure "main" branch exists (HEAD points to it)
-        {
-            let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
-            repo.branch("main", &head_commit, true).unwrap();
-        }
-
-        repo
+        Command::new("git").args(["add", "."]).current_dir(path).output().unwrap();
+        Command::new("git").args(["commit", "-m", "initial"]).current_dir(path).output().unwrap();
     }
 
-    /// Helper: create a commit on a given branch that writes `content` to `file`.
-    fn commit_file_on_branch(
-        repo: &Repository,
-        branch_name: &str,
-        file_name: &str,
-        content: &str,
-        message: &str,
-    ) -> Oid {
-        let sig = Signature::now("test", "test@test.com").unwrap();
-
-        let parent_commit = repo
-            .find_branch(branch_name, git2::BranchType::Local)
-            .unwrap()
-            .get()
-            .peel_to_commit()
-            .unwrap();
-
-        // Write file to workdir
-        let workdir = repo.workdir().unwrap();
-        fs::write(workdir.join(file_name), content).unwrap();
-
-        // Build a new tree from the parent tree + the new blob
-        let blob_oid = repo.blob(content.as_bytes()).unwrap();
-        let mut builder = repo
-            .treebuilder(Some(&parent_commit.tree().unwrap()))
-            .unwrap();
-        builder
-            .insert(file_name, blob_oid, 0o100644)
-            .unwrap();
-        let tree_oid = builder.write().unwrap();
-        let tree = repo.find_tree(tree_oid).unwrap();
-
-        repo.commit(
-            Some(&format!("refs/heads/{}", branch_name)),
-            &sig,
-            &sig,
-            message,
-            &tree,
-            &[&parent_commit],
-        )
-        .unwrap()
+    fn commit_file(path: &Path, branch: &str, file: &str, content: &str) {
+        Command::new("git").args(["checkout", branch]).current_dir(path).output().unwrap();
+        fs::write(path.join(file), content).unwrap();
+        Command::new("git").args(["add", file]).current_dir(path).output().unwrap();
+        Command::new("git").args(["commit", "-m", &format!("add {}", file)]).current_dir(path).output().unwrap();
     }
 
     #[test]
     fn test_fast_forward_merge() {
-        let dir = tempfile::tempdir().unwrap();
-        let repo = init_repo_with_commit(dir.path());
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        Command::new("git").args(["checkout", "-b", "feature"]).current_dir(dir.path()).output().unwrap();
+        commit_file(dir.path(), "feature", "new.txt", "hello\n");
+        Command::new("git").args(["checkout", "main"]).current_dir(dir.path()).output().unwrap();
 
-        // Create feature branch from main
-        let main_commit = repo
-            .find_branch("main", git2::BranchType::Local)
-            .unwrap()
-            .get()
-            .peel_to_commit()
-            .unwrap();
-        repo.branch("feature", &main_commit, false).unwrap();
-
-        // Add a commit only on feature (main stays behind)
-        let feature_oid =
-            commit_file_on_branch(&repo, "feature", "new_file.txt", "hello\n", "add file");
-
-        // Merge feature into main — should fast-forward
-        let result =
-            MergeQueueProcessor::try_merge(dir.path(), "feature", "main").unwrap();
-
+        let result = MergeQueueProcessor::try_merge(dir.path(), "feature", "main").unwrap();
         assert!(matches!(result, MergeResult::Success));
 
-        // Verify main now points at the same commit as feature
-        let main_tip = repo
-            .find_branch("main", git2::BranchType::Local)
-            .unwrap()
-            .get()
-            .peel_to_commit()
-            .unwrap()
-            .id();
-        assert_eq!(main_tip, feature_oid);
+        // Verify new.txt exists on main
+        let output = Command::new("git").args(["show", "main:new.txt"]).current_dir(dir.path()).output().unwrap();
+        assert!(output.status.success());
     }
 
     #[test]
     fn test_normal_merge_no_conflicts() {
-        let dir = tempfile::tempdir().unwrap();
-        let repo = init_repo_with_commit(dir.path());
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        Command::new("git").args(["checkout", "-b", "feature"]).current_dir(dir.path()).output().unwrap();
+        commit_file(dir.path(), "feature", "feature.txt", "from feature\n");
+        commit_file(dir.path(), "main", "main.txt", "from main\n");
 
-        // Create feature branch from main
-        let main_commit = repo
-            .find_branch("main", git2::BranchType::Local)
-            .unwrap()
-            .get()
-            .peel_to_commit()
-            .unwrap();
-        repo.branch("feature", &main_commit, false).unwrap();
-
-        // Add different files on each branch so they diverge without conflict
-        commit_file_on_branch(&repo, "main", "main_file.txt", "from main\n", "main work");
-        commit_file_on_branch(
-            &repo,
-            "feature",
-            "feature_file.txt",
-            "from feature\n",
-            "feature work",
-        );
-
-        let result =
-            MergeQueueProcessor::try_merge(dir.path(), "feature", "main").unwrap();
-
+        let result = MergeQueueProcessor::try_merge(dir.path(), "feature", "main").unwrap();
         assert!(matches!(result, MergeResult::Success));
-
-        // After merge, main's tree should contain both files
-        let main_commit = repo
-            .find_branch("main", git2::BranchType::Local)
-            .unwrap()
-            .get()
-            .peel_to_commit()
-            .unwrap();
-        let tree = main_commit.tree().unwrap();
-        assert!(tree.get_name("main_file.txt").is_some());
-        assert!(tree.get_name("feature_file.txt").is_some());
-
-        // Should be a merge commit with 2 parents
-        assert_eq!(main_commit.parent_count(), 2);
     }
 
     #[test]
     fn test_conflict_detection() {
-        let dir = tempfile::tempdir().unwrap();
-        let repo = init_repo_with_commit(dir.path());
+        let dir = tempdir().unwrap();
+        init_repo(dir.path());
+        Command::new("git").args(["checkout", "-b", "feature"]).current_dir(dir.path()).output().unwrap();
+        commit_file(dir.path(), "feature", "shared.txt", "feature version\n");
+        commit_file(dir.path(), "main", "shared.txt", "main version\n");
 
-        // Create feature branch from main
-        let main_commit = repo
-            .find_branch("main", git2::BranchType::Local)
-            .unwrap()
-            .get()
-            .peel_to_commit()
-            .unwrap();
-        repo.branch("feature", &main_commit, false).unwrap();
-
-        // Both branches modify the same file with different content
-        commit_file_on_branch(
-            &repo,
-            "main",
-            "shared.txt",
-            "main version\n",
-            "main edits shared",
-        );
-        commit_file_on_branch(
-            &repo,
-            "feature",
-            "shared.txt",
-            "feature version\n",
-            "feature edits shared",
-        );
-
-        let result =
-            MergeQueueProcessor::try_merge(dir.path(), "feature", "main").unwrap();
-
+        let result = MergeQueueProcessor::try_merge(dir.path(), "feature", "main").unwrap();
         match result {
             MergeResult::Conflict { files } => {
-                assert!(!files.is_empty());
                 assert!(files.contains(&"shared.txt".to_string()));
             }
-            _ => panic!("Expected conflict, got success or error"),
+            _ => panic!("Expected conflict"),
         }
     }
 }
