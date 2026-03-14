@@ -13,6 +13,9 @@ pub struct LoomEntry {
     pub workflow_instance_id: Option<String>,
     pub entry_type: String,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +39,7 @@ impl LoomEntry {
             workflow_instance_id: row.get("workflow_instance_id")?,
             entry_type: row.get("entry_type")?,
             content: row.get("content")?,
+            role: row.get("role").ok(),
         })
     }
 
@@ -49,9 +53,14 @@ impl LoomEntry {
         Self::get_by_id(conn, &id)
     }
 
+    const SELECT_WITH_ROLE: &'static str =
+        "SELECT l.*, tas.role FROM loom_entries l \
+         LEFT JOIN agent_sessions a ON l.agent_id = a.id \
+         LEFT JOIN team_agent_slots tas ON a.slot_id = tas.id";
+
     pub fn get_by_id(conn: &Connection, id: &str) -> Result<Self> {
         conn.query_row(
-            "SELECT * FROM loom_entries WHERE id = ?1",
+            &format!("{} WHERE l.id = ?1", Self::SELECT_WITH_ROLE),
             params![id],
             Self::from_row,
         ).map_err(|e| match e {
@@ -63,9 +72,22 @@ impl LoomEntry {
     pub fn list_by_project(conn: &Connection, project_id: &str, limit: Option<i64>) -> Result<Vec<Self>> {
         let limit_val = limit.unwrap_or(100);
         let mut stmt = conn.prepare(
-            "SELECT * FROM loom_entries WHERE project_id = ?1 ORDER BY timestamp DESC LIMIT ?2"
+            &format!("{} WHERE l.project_id = ?1 ORDER BY l.timestamp DESC LIMIT ?2", Self::SELECT_WITH_ROLE)
         )?;
         let rows = stmt.query_map(params![project_id, limit_val], Self::from_row)?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
+    pub fn list_recent(conn: &Connection, limit: Option<i64>) -> Result<Vec<Self>> {
+        let limit_val = limit.unwrap_or(50);
+        let mut stmt = conn.prepare(
+            &format!("{} ORDER BY l.timestamp DESC LIMIT ?1", Self::SELECT_WITH_ROLE)
+        )?;
+        let rows = stmt.query_map(params![limit_val], Self::from_row)?;
         let mut entries = Vec::new();
         for row in rows {
             entries.push(row?);
@@ -76,7 +98,7 @@ impl LoomEntry {
     pub fn list_by_team(conn: &Connection, team_id: &str, limit: Option<i64>) -> Result<Vec<Self>> {
         let limit_val = limit.unwrap_or(100);
         let mut stmt = conn.prepare(
-            "SELECT * FROM loom_entries WHERE team_id = ?1 ORDER BY timestamp DESC LIMIT ?2"
+            &format!("{} WHERE l.team_id = ?1 ORDER BY l.timestamp DESC LIMIT ?2", Self::SELECT_WITH_ROLE)
         )?;
         let rows = stmt.query_map(params![team_id, limit_val], Self::from_row)?;
         let mut entries = Vec::new();

@@ -124,6 +124,43 @@ impl OrchestratorRunner {
         }
     }
 
+    // ── Worktree cleanup helper ──────────────────────────────────────
+
+    fn cleanup_agent_worktree(&self, agent_session_id: &str) {
+        let (worktree_path, branch, project_dir) = {
+            let conn = self.db.lock().unwrap();
+            match AgentSession::get_by_id(&conn, agent_session_id) {
+                Ok(session) => {
+                    let dir = Team::get_by_id(&conn, &session.team_id)
+                        .ok()
+                        .and_then(|t| Project::get_by_id(&conn, &t.project_id).ok())
+                        .map(|p| p.directory);
+                    (session.worktree_path, session.branch, dir)
+                }
+                Err(_) => return,
+            }
+        };
+        // Remove the worktree directory
+        if let Some(wt_path) = &worktree_path {
+            let path = std::path::Path::new(wt_path);
+            if path.exists() {
+                if let Err(e) = std::fs::remove_dir_all(path) {
+                    tracing::warn!(session = %agent_session_id, path = %wt_path, "Failed to remove worktree dir: {}", e);
+                } else {
+                    tracing::info!(session = %agent_session_id, path = %wt_path, "Cleaned up worktree directory");
+                }
+            }
+        }
+        // Prune the git worktree reference
+        if let (Some(branch), Some(dir)) = (branch, project_dir) {
+            let worktree_name = branch.replace('/', "-");
+            let _ = self.worktree_manager.remove_worktree(
+                std::path::Path::new(&dir),
+                &worktree_name,
+            );
+        }
+    }
+
     // ── Activity logging helper ──────────────────────────────────────
 
     fn log_activity(&self, event_type: &str, message: &str,
@@ -142,14 +179,46 @@ impl OrchestratorRunner {
             message: message.to_string(),
             metadata: None,
         });
+
+        // Also write to loom if we have team + project context
+        if let (Some(tid), Some(pid)) = (team_id, project_id) {
+            use crate::models::loom::{LoomEntry, CreateLoomEntry};
+            let loom_type = match event_type {
+                "agent_spawned" => "status",
+                "agent_completed" => "completion",
+                "issue_claimed" => "status",
+                "issue_retry" | "issue_max_retries" => "warning",
+                _ => "status",
+            };
+            let _ = LoomEntry::create(&conn, &CreateLoomEntry {
+                agent_id: agent_id.map(|s| s.to_string()),
+                team_id: tid.to_string(),
+                project_id: pid.to_string(),
+                workflow_instance_id: workflow_instance_id.map(|s| s.to_string()),
+                entry_type: loom_type.to_string(),
+                content: message.to_string(),
+            });
+        }
     }
 
     // ── Startup recovery (Task 13) ──────────────────────────────────
 
     pub async fn restore_running_instances(&mut self) {
-        // Reset orphaned in_progress issues (from agents killed by restart)
+        // Reset orphaned sessions and issues from agents killed by restart
         {
             let conn = self.db.lock().unwrap();
+
+            // Mark stale agent sessions as failed
+            let stale_sessions = conn.execute(
+                "UPDATE agent_sessions SET state = 'failed', updated_at = datetime('now') \
+                 WHERE state IN ('running', 'idle', 'ready', 'working')",
+                [],
+            ).unwrap_or(0);
+            if stale_sessions > 0 {
+                tracing::info!("Cleaned up {} stale agent sessions on startup", stale_sessions);
+            }
+
+            // Reset orphaned in_progress issues
             let reset_count = conn.execute(
                 "UPDATE issues SET status = 'open', claimed_by = NULL, claimed_at = NULL, \
                  updated_at = datetime('now') \
@@ -343,11 +412,11 @@ impl OrchestratorRunner {
             "{}\n\n\
             You are working on issue {} in project {}.\n\n\
             When you have completed your work, close your issue by running:\n\
-            curl -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
+            curl -sk -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
             -H 'Content-Type: application/json' \\\n  \
             -d '{{\"status\": \"closed\", \"summary\": \"Brief description of what you accomplished\"}}'\n\n\
             You can also post progress updates at any time:\n\
-            curl -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
+            curl -sk -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
             -H 'Content-Type: application/json' \\\n  \
             -d '{{\"summary\": \"Current progress update\"}}'",
             stage.prompt,
@@ -711,25 +780,16 @@ impl OrchestratorRunner {
                 {
                     let conn = self.db.lock().unwrap();
                     if let Ok(session) = AgentSession::get_by_id(&conn, &ta.agent_session_id) {
-                        if let (Some(branch), Some(wt_path)) = (&session.branch, &session.worktree_path) {
+                        if let (Some(branch), Some(_wt_path)) = (&session.branch, &session.worktree_path) {
                             let merge_id = uuid::Uuid::new_v4().to_string();
                             let project_id_for_merge = Team::get_by_id(&conn, &ta.team_id)
                                 .map(|t| t.project_id)
                                 .unwrap_or_default();
-                            // Detect target branch from the project's repo
-                            let target = if !project_id_for_merge.is_empty() {
-                                Project::get_by_id(&conn, &project_id_for_merge)
-                                    .ok()
-                                    .and_then(|p| WorktreeManager::detect_default_branch(std::path::Path::new(&p.directory)))
-                                    .unwrap_or_else(|| "main".to_string())
-                            } else {
-                                "main".to_string()
-                            };
                             let _ = conn.execute(
-                                "INSERT INTO merge_queue_entries (id, project_id, agent_session_id, branch, worktree_path, target_branch) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                                rusqlite::params![merge_id, project_id_for_merge, ta.agent_session_id, branch, wt_path, target],
+                                "INSERT INTO merge_queue (id, project_id, branch_name, agent_session_id, issue_id, team_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                                rusqlite::params![merge_id, project_id_for_merge, branch, ta.agent_session_id, ta.issue_id, ta.team_id],
                             );
-                            tracing::info!(branch = %branch, target = %target, "Enqueued branch for merge");
+                            tracing::info!(branch = %branch, "Enqueued branch for merge");
                         }
                     }
                 }
@@ -753,6 +813,7 @@ impl OrchestratorRunner {
                         metadata: None,
                     });
                 }
+                // Note: worktree cleanup happens after merge in sweep_merge_queue
                 to_remove.push(key.clone());
                 continue;
             }
@@ -760,6 +821,7 @@ impl OrchestratorRunner {
             // Check if agent process has exited
             let exit_status = self.process_manager.check_agent_exit(&ta.agent_session_id).await;
             if let Some(success) = exit_status {
+                let session_id_for_cleanup = ta.agent_session_id.clone();
                 self.process_manager.remove_agent(&ta.agent_session_id).await;
                 // If issue is still in_progress, agent exited without closing it —
                 // unclaim so it can be retried, regardless of exit code
@@ -792,6 +854,8 @@ impl OrchestratorRunner {
                         );
                     }
                 }
+                // Clean up worktree after handling the exit
+                self.cleanup_agent_worktree(&session_id_for_cleanup);
                 to_remove.push(key.clone());
                 continue;
             }
@@ -810,6 +874,7 @@ impl OrchestratorRunner {
                 .is_some();
             if !agent_exists {
                 // Agent removed (e.g. by WS handler) — unclaim issue and mark session failed
+                let session_id_for_wt = ta.agent_session_id.clone();
                 {
                     let conn = self.db.lock().unwrap();
                     let _ = Issue::unclaim(&conn, &ta.issue_id);
@@ -819,6 +884,7 @@ impl OrchestratorRunner {
                     team = %ta.team_id, role = %ta.role, issue = %ta.issue_id,
                     "Team agent PTY died — unclaiming issue"
                 );
+                self.cleanup_agent_worktree(&session_id_for_wt);
                 to_remove.push(key.clone());
                 continue;
             }
@@ -827,6 +893,7 @@ impl OrchestratorRunner {
             let idle_secs = ta.last_activity.elapsed().as_secs();
             if idle_secs >= KILL_THRESHOLD_SECS {
                 tracing::warn!(team = %ta.team_id, role = %ta.role, "Killing idle team agent");
+                let idle_session_id = ta.agent_session_id.clone();
                 let _ = self
                     .process_manager
                     .stop_agent(&ta.agent_session_id)
@@ -836,6 +903,7 @@ impl OrchestratorRunner {
                     let _ = Issue::unclaim(&conn, &ta.issue_id);
                     let _ = AgentSession::update_state(&conn, &ta.agent_session_id, "failed");
                 }
+                self.cleanup_agent_worktree(&idle_session_id);
                 to_remove.push(key.clone());
             } else if idle_secs >= NUDGE_WARNING_SECS && ta.nudge_count >= 1 {
                 let msg = "\n\nNo status update received. Please respond or your session will be terminated.\n";
@@ -1257,17 +1325,36 @@ impl OrchestratorRunner {
         prompt_parts.push(format!(
             "\n## Your Task\n**{}**\n\n{}\n\n\
             When you have completed your work, close your issue by running:\n\
-            curl -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
+            curl -sk -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
             -H 'Content-Type: application/json' \\\n  \
             -d '{{\"status\": \"closed\", \"summary\": \"Brief description of what you accomplished\"}}'\n\n\
             You can also post progress updates at any time:\n\
-            curl -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
+            curl -sk -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
             -H 'Content-Type: application/json' \\\n  \
             -d '{{\"summary\": \"Current progress update\"}}'",
             issue.title,
             description,
             team.project_id, issue.id,
             team.project_id, issue.id,
+        ));
+
+        // Loom progress reporting instructions
+        prompt_parts.push(format!(
+            "\n## Progress Reporting\n\
+            Post status updates as you work so the team dashboard shows your progress.\n\
+            Use these curl commands at natural transition points (3-5 updates per task is ideal):\n\n\
+            When starting a phase of work:\n\
+            curl -sk -X POST ${{IRONWEAVE_API}}/api/loom \\\n  \
+            -H 'Content-Type: application/json' \\\n  \
+            -d '{{\"team_id\": \"{team_id}\", \"project_id\": \"{project_id}\", \"agent_id\": \"{agent_id}\", \
+            \"entry_type\": \"status\", \"content\": \"Starting: <what you are about to do>\"}}'\n\n\
+            When blocked or hitting an issue, use entry_type \"warning\".\n\
+            When you discover something notable, use entry_type \"finding\".\n\
+            When done (before closing the issue), use entry_type \"completion\".\n\n\
+            Only change the entry_type and content fields — keep team_id, project_id, and agent_id as shown.",
+            team_id = team.id,
+            project_id = team.project_id,
+            agent_id = session.id,
         ));
 
         let prompt = prompt_parts.join("\n");
