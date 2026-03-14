@@ -3,6 +3,7 @@ use axum::{
     response::IntoResponse,
     Json, http::StatusCode,
 };
+use crate::models::agent::AgentSession;
 use futures_util::{SinkExt, StreamExt};
 use portable_pty::PtySize;
 use serde::{Deserialize, Serialize};
@@ -157,6 +158,14 @@ pub async fn stop(
         .await
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|_| StatusCode::NOT_FOUND)
+}
+
+pub async fn delete_dead(
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    let conn = state.db.lock().unwrap();
+    let deleted = AgentSession::delete_dead_sessions(&conn).unwrap_or(0);
+    Json(serde_json::json!({ "deleted": deleted }))
 }
 
 pub async fn ws_agent_output(

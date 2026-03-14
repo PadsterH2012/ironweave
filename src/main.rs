@@ -156,6 +156,7 @@ async fn main() {
         // Agents
         .route("/api/agents", get(api::agents::list))
         .route("/api/agents/spawn", post(api::agents::spawn))
+        .route("/api/agents/dead", delete(api::agents::delete_dead))
         .route("/api/agents/{id}", get(api::agents::get_agent))
         .route("/api/agents/{id}/stop", post(api::agents::stop))
         // Agent WebSocket
