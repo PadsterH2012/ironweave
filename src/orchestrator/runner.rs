@@ -167,9 +167,21 @@ impl OrchestratorRunner {
     // ── Startup recovery (Task 13) ──────────────────────────────────
 
     pub async fn restore_running_instances(&mut self) {
-        // Reset orphaned in_progress issues (from agents killed by restart)
+        // Reset orphaned sessions and issues from agents killed by restart
         {
             let conn = self.db.lock().unwrap();
+
+            // Mark stale agent sessions as failed
+            let stale_sessions = conn.execute(
+                "UPDATE agent_sessions SET state = 'failed', updated_at = datetime('now') \
+                 WHERE state IN ('running', 'idle', 'ready', 'working')",
+                [],
+            ).unwrap_or(0);
+            if stale_sessions > 0 {
+                tracing::info!("Cleaned up {} stale agent sessions on startup", stale_sessions);
+            }
+
+            // Reset orphaned in_progress issues
             let reset_count = conn.execute(
                 "UPDATE issues SET status = 'open', claimed_by = NULL, claimed_at = NULL, \
                  updated_at = datetime('now') \
