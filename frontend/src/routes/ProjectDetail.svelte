@@ -6,6 +6,7 @@
     teams,
     workflows,
     mounts,
+    loom,
     type AppStatus,
     type Project,
     type Team,
@@ -28,6 +29,7 @@
   import ProjectSettings from '../lib/components/ProjectSettings.svelte';
   import MergeQueue from '../lib/components/MergeQueue.svelte';
   import DagGraph from '../lib/components/DagGraph.svelte';
+  import LoomFeed from '../lib/components/LoomFeed.svelte';
 
   interface Props {
     params: { id: string };
@@ -88,6 +90,7 @@
     { key: 'issues', label: 'Issues' },
     { key: 'workflows', label: 'Workflows' },
     { key: 'merge-queue', label: 'Merge Queue' },
+    { key: 'loom', label: 'Loom' },
     { key: 'files', label: 'Files' },
     ...(project?.mount_id ? [{ key: 'history', label: 'History' }] : []),
     { key: 'settings', label: 'Settings' },
@@ -1067,6 +1070,8 @@
       </div>
     {:else if activeTab === 'merge-queue'}
       <MergeQueue projectId={params.id} />
+    {:else if activeTab === 'loom'}
+      <LoomFeed fetchFn={() => loom.byProject(params.id)} />
     {:else if activeTab === 'files'}
       <ProjectFiles projectId={params.id} />
     {:else if activeTab === 'history'}

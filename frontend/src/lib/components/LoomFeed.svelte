@@ -2,10 +2,33 @@
   import type { LoomEntry } from '../api';
 
   interface Props {
-    entries: LoomEntry[];
+    fetchFn: () => Promise<LoomEntry[]>;
+    pollInterval?: number;
   }
 
-  let { entries }: Props = $props();
+  let { fetchFn, pollInterval = 10000 }: Props = $props();
+
+  let entries: LoomEntry[] = $state([]);
+  let loading = $state(true);
+  let error: string | null = $state(null);
+
+  async function load() {
+    try {
+      entries = await fetchFn();
+      error = null;
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to load';
+    } finally {
+      loading = false;
+    }
+  }
+
+  $effect(() => {
+    loading = true;
+    load();
+    const interval = setInterval(load, pollInterval);
+    return () => clearInterval(interval);
+  });
 
   function timeAgo(iso: string): string {
     const diff = Date.now() - new Date(iso).getTime();
@@ -47,12 +70,20 @@
 <div class="rounded-xl bg-gray-900 border border-gray-800 p-4 h-full flex flex-col">
   <h3 class="text-sm font-semibold text-gray-300 mb-3">Loom</h3>
 
-  {#if entries.length === 0}
+  {#if loading}
+    <div class="flex-1 flex items-center justify-center text-gray-500 text-sm">
+      Loading...
+    </div>
+  {:else if error}
+    <div class="flex-1 flex items-center justify-center text-red-400 text-sm">
+      {error}
+    </div>
+  {:else if entries.length === 0}
     <div class="flex-1 flex items-center justify-center text-gray-500 text-sm">
       No loom entries yet
     </div>
   {:else}
-    <div class="flex-1 overflow-y-auto space-y-1.5 max-h-96 pr-1">
+    <div class="flex-1 overflow-y-auto space-y-1.5 max-h-[600px] pr-1">
       {#each entries as entry (entry.id)}
         <div class="flex items-start gap-2 py-1.5 border-b border-gray-800/50 last:border-0">
           <span class="{typeColor(entry.entry_type)} text-sm mt-0.5 w-4 text-center flex-shrink-0">
@@ -63,7 +94,7 @@
               {entry.role ?? entry.agent_id?.slice(0, 8) ?? ''}
             </span>
           {/if}
-          <span class="text-sm text-gray-300 flex-1 min-w-0 truncate">
+          <span class="text-sm text-gray-300 flex-1 min-w-0 break-words">
             {entry.content}
           </span>
           <span class="text-xs text-gray-500 whitespace-nowrap flex-shrink-0">
