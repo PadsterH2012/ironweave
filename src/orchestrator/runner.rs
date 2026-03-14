@@ -375,11 +375,11 @@ impl OrchestratorRunner {
             "{}\n\n\
             You are working on issue {} in project {}.\n\n\
             When you have completed your work, close your issue by running:\n\
-            curl -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
+            curl -sk -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
             -H 'Content-Type: application/json' \\\n  \
             -d '{{\"status\": \"closed\", \"summary\": \"Brief description of what you accomplished\"}}'\n\n\
             You can also post progress updates at any time:\n\
-            curl -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
+            curl -sk -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
             -H 'Content-Type: application/json' \\\n  \
             -d '{{\"summary\": \"Current progress update\"}}'",
             stage.prompt,
@@ -1289,17 +1289,36 @@ impl OrchestratorRunner {
         prompt_parts.push(format!(
             "\n## Your Task\n**{}**\n\n{}\n\n\
             When you have completed your work, close your issue by running:\n\
-            curl -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
+            curl -sk -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
             -H 'Content-Type: application/json' \\\n  \
             -d '{{\"status\": \"closed\", \"summary\": \"Brief description of what you accomplished\"}}'\n\n\
             You can also post progress updates at any time:\n\
-            curl -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
+            curl -sk -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{} \\\n  \
             -H 'Content-Type: application/json' \\\n  \
             -d '{{\"summary\": \"Current progress update\"}}'",
             issue.title,
             description,
             team.project_id, issue.id,
             team.project_id, issue.id,
+        ));
+
+        // Loom progress reporting instructions
+        prompt_parts.push(format!(
+            "\n## Progress Reporting\n\
+            Post status updates as you work so the team dashboard shows your progress.\n\
+            Use these curl commands at natural transition points (3-5 updates per task is ideal):\n\n\
+            When starting a phase of work:\n\
+            curl -sk -X POST ${{IRONWEAVE_API}}/api/loom \\\n  \
+            -H 'Content-Type: application/json' \\\n  \
+            -d '{{\"team_id\": \"{team_id}\", \"project_id\": \"{project_id}\", \"agent_id\": \"{agent_id}\", \
+            \"entry_type\": \"status\", \"content\": \"Starting: <what you are about to do>\"}}'\n\n\
+            When blocked or hitting an issue, use entry_type \"warning\".\n\
+            When you discover something notable, use entry_type \"finding\".\n\
+            When done (before closing the issue), use entry_type \"completion\".\n\n\
+            Only change the entry_type and content fields — keep team_id, project_id, and agent_id as shown.",
+            team_id = team.id,
+            project_id = team.project_id,
+            agent_id = session.id,
         ));
 
         let prompt = prompt_parts.join("\n");
