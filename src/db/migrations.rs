@@ -302,6 +302,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         // Disable FK enforcement during table swap (other tables reference agent_sessions)
         conn.execute_batch("PRAGMA foreign_keys=OFF;")?;
         conn.execute_batch("
+            DROP TABLE IF EXISTS agent_sessions_new;
             CREATE TABLE agent_sessions_new (
                 id TEXT PRIMARY KEY,
                 team_id TEXT NOT NULL REFERENCES teams(id),
