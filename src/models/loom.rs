@@ -16,6 +16,9 @@ pub struct LoomEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub runtime: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,6 +43,7 @@ impl LoomEntry {
             entry_type: row.get("entry_type")?,
             content: row.get("content")?,
             role: row.get("role").ok(),
+            runtime: row.get("runtime").ok(),
         })
     }
 
@@ -54,7 +58,7 @@ impl LoomEntry {
     }
 
     const SELECT_WITH_ROLE: &'static str =
-        "SELECT l.*, tas.role FROM loom_entries l \
+        "SELECT l.*, tas.role, a.runtime FROM loom_entries l \
          LEFT JOIN agent_sessions a ON l.agent_id = a.id \
          LEFT JOIN team_agent_slots tas ON a.slot_id = tas.id";
 
