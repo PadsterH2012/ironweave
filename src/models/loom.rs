@@ -73,6 +73,19 @@ impl LoomEntry {
         Ok(entries)
     }
 
+    pub fn list_recent(conn: &Connection, limit: Option<i64>) -> Result<Vec<Self>> {
+        let limit_val = limit.unwrap_or(50);
+        let mut stmt = conn.prepare(
+            "SELECT * FROM loom_entries ORDER BY timestamp DESC LIMIT ?1"
+        )?;
+        let rows = stmt.query_map(params![limit_val], Self::from_row)?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
     pub fn list_by_team(conn: &Connection, team_id: &str, limit: Option<i64>) -> Result<Vec<Self>> {
         let limit_val = limit.unwrap_or(100);
         let mut stmt = conn.prepare(

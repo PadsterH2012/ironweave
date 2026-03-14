@@ -721,6 +721,23 @@ export const mergeQueue = {
   approve: (projectId: string, id: string) => post<MergeQueueEntry>(`/projects/${projectId}/merge-queue/${id}/approve`, {}),
 };
 
+export interface LoomEntry {
+  id: string;
+  timestamp: string;
+  agent_id: string | null;
+  team_id: string;
+  project_id: string;
+  workflow_instance_id: string | null;
+  entry_type: string;
+  content: string;
+}
+
+export const loom = {
+  recent: (limit = 50) => get<LoomEntry[]>(`/loom?limit=${limit}`),
+  byProject: (projectId: string, limit = 50) => get<LoomEntry[]>(`/projects/${projectId}/loom?limit=${limit}`),
+  byTeam: (teamId: string, limit = 50) => get<LoomEntry[]>(`/teams/${teamId}/loom?limit=${limit}`),
+};
+
 export const sync = {
   trigger: (projectId: string) => post<SyncStatus>(`/projects/${projectId}/sync`, {}),
   status: (projectId: string) => get<SyncStatus>(`/projects/${projectId}/sync/status`),

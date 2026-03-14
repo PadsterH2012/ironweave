@@ -142,6 +142,26 @@ impl OrchestratorRunner {
             message: message.to_string(),
             metadata: None,
         });
+
+        // Also write to loom if we have team + project context
+        if let (Some(tid), Some(pid)) = (team_id, project_id) {
+            use crate::models::loom::{LoomEntry, CreateLoomEntry};
+            let loom_type = match event_type {
+                "agent_spawned" => "status",
+                "agent_completed" => "completion",
+                "issue_claimed" => "status",
+                "issue_retry" | "issue_max_retries" => "warning",
+                _ => "status",
+            };
+            let _ = LoomEntry::create(&conn, &CreateLoomEntry {
+                agent_id: agent_id.map(|s| s.to_string()),
+                team_id: tid.to_string(),
+                project_id: pid.to_string(),
+                workflow_instance_id: workflow_instance_id.map(|s| s.to_string()),
+                entry_type: loom_type.to_string(),
+                content: message.to_string(),
+            });
+        }
     }
 
     // ── Startup recovery (Task 13) ──────────────────────────────────

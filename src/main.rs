@@ -206,7 +206,11 @@ async fn main() {
         .route("/api/projects/{pid}/merge-queue", get(api::merge_queue::list_queue))
         .route("/api/projects/{pid}/merge-queue/{id}/approve", post(api::merge_queue::approve_merge))
         // Runtimes
-        .route("/api/runtimes", get(api::runtimes::list));
+        .route("/api/runtimes", get(api::runtimes::list))
+        // Loom
+        .route("/api/projects/{pid}/loom", get(api::loom::list_by_project))
+        .route("/api/teams/{tid}/loom", get(api::loom::list_by_team))
+        .route("/api/loom", get(api::loom::list_recent).post(api::loom::create));
 
     // Only add auth middleware if auth is configured
     if auth_config.is_some() {

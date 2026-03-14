@@ -2,13 +2,16 @@
   import {
     dashboard,
     agents,
+    loom as loomApi,
     type AgentInfo,
     type DashboardStats,
     type ActivityLogEntry,
     type MetricsResponse,
     type SystemHealth,
+    type LoomEntry,
   } from '../lib/api';
   import ActivityFeed from '../lib/components/ActivityFeed.svelte';
+  import LoomFeed from '../lib/components/LoomFeed.svelte';
   import MetricsChart from '../lib/components/MetricsChart.svelte';
   import SystemHealthPanel from '../lib/components/SystemHealth.svelte';
 
@@ -17,22 +20,25 @@
   let activityEntries: ActivityLogEntry[] = $state([]);
   let metricsData: MetricsResponse | null = $state(null);
   let healthData: SystemHealth | null = $state(null);
+  let loomEntries: LoomEntry[] = $state([]);
   let error: string | null = $state(null);
   let metricsDays: number = $state(7);
 
   async function fetchAll() {
     try {
-      const [dashStats, agentIds, activity, metrics, system] = await Promise.all([
+      const [dashStats, agentIds, activity, metrics, system, loomData] = await Promise.all([
         dashboard.stats(),
         agents.list(),
         dashboard.activity(50, 0),
         dashboard.metrics(metricsDays),
         dashboard.system(),
+        loomApi.recent(50),
       ]);
       stats = dashStats;
       activityEntries = activity;
       metricsData = metrics;
       healthData = system;
+      loomEntries = loomData;
 
       agentSessions = agentIds;
       error = null;
@@ -161,6 +167,9 @@
       {/if}
     </div>
   </div>
+
+  <!-- Loom Feed -->
+  <LoomFeed entries={loomEntries} />
 
   <!-- System Health -->
   {#if healthData}
