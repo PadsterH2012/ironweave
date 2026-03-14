@@ -58,6 +58,11 @@
           <span class="{typeColor(entry.entry_type)} text-sm mt-0.5 w-4 text-center flex-shrink-0">
             {typeIcon(entry.entry_type)}
           </span>
+          {#if entry.role || entry.agent_id}
+            <span class="text-xs text-purple-400 font-mono whitespace-nowrap mt-0.5 flex-shrink-0" title={entry.agent_id ?? ''}>
+              {entry.role ?? entry.agent_id?.slice(0, 8) ?? ''}
+            </span>
+          {/if}
           <span class="text-sm text-gray-300 flex-1 min-w-0 truncate">
             {entry.content}
           </span>

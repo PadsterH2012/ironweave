@@ -730,6 +730,7 @@ export interface LoomEntry {
   workflow_instance_id: string | null;
   entry_type: string;
   content: string;
+  role?: string;
 }
 
 export const loom = {
