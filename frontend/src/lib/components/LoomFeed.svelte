@@ -141,7 +141,7 @@
             </span>
             {#if entry.role || entry.agent_id}
               <span class="text-xs text-purple-400 font-mono whitespace-nowrap mt-0.5 flex-shrink-0" title={entry.agent_id ?? ''}>
-                {entry.role ?? entry.agent_id?.slice(0, 8) ?? ''}{#if entry.runtime}<span class="{runtimeColor(entry.runtime)} opacity-70"> — {entry.runtime}</span>{/if}
+                {entry.role ?? entry.agent_id?.slice(0, 8) ?? ''}{#if entry.model}<span class="{runtimeColor(entry.runtime ?? '')} opacity-70"> — {entry.model}</span>{:else if entry.runtime}<span class="{runtimeColor(entry.runtime)} opacity-70"> — {entry.runtime}</span>{/if}
               </span>
             {/if}
             <span class="text-sm text-gray-300 flex-1 min-w-0 {expandedId === entry.id ? '' : 'truncate'}">
@@ -156,7 +156,9 @@
             <div class="ml-6 mt-1.5 space-y-1 text-[11px] text-gray-500">
               <div class="flex gap-4 flex-wrap">
                 <span>Type: <span class="{typeColor(entry.entry_type)} font-medium">{entry.entry_type}</span></span>
-                {#if entry.runtime}
+                {#if entry.model}
+                  <span>Model: <span class="{runtimeColor(entry.runtime ?? '')} font-medium">{entry.model}</span></span>
+                {:else if entry.runtime}
                   <span>Runtime: <span class="{runtimeColor(entry.runtime)} font-medium">{entry.runtime}</span></span>
                 {/if}
                 {#if entry.agent_id}

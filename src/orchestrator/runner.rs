@@ -1396,6 +1396,7 @@ impl OrchestratorRunner {
                     team_id: team.id.clone(),
                     slot_id: slot.id.clone(),
                     runtime: slot.runtime.clone(),
+                    model: slot.model.clone(),
                     workflow_instance_id: None,
                     pid: None,
                     worktree_path: worktree_path.as_ref().map(|p| p.to_string_lossy().to_string()),

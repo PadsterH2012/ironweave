@@ -748,6 +748,7 @@ export interface LoomEntry {
   content: string;
   role?: string;
   runtime?: string;
+  model?: string;
 }
 
 export const loom = {

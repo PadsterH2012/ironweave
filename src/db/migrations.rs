@@ -185,6 +185,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     // Teams & model selection
     let _ = conn.execute("ALTER TABLE team_agent_slots ADD COLUMN model TEXT", []);
+    let _ = conn.execute("ALTER TABLE agent_sessions ADD COLUMN model TEXT", []);
 
     // Team dispatch
     let _ = conn.execute("ALTER TABLE issues ADD COLUMN role TEXT", []);

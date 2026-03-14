@@ -394,6 +394,7 @@ mod tests {
             team_id: team.id.clone(),
             slot_id: slot.id.clone(),
             runtime: "claude".to_string(),
+            model: None,
             workflow_instance_id: None,
             pid: None,
             worktree_path: None,

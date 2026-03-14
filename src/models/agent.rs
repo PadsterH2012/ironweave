@@ -10,6 +10,7 @@ pub struct AgentSession {
     pub slot_id: String,
     pub workflow_instance_id: Option<String>,
     pub runtime: String,
+    pub model: Option<String>,
     pub pid: Option<i64>,
     pub worktree_path: Option<String>,
     pub branch: Option<String>,
@@ -26,6 +27,7 @@ pub struct CreateAgentSession {
     pub team_id: String,
     pub slot_id: String,
     pub runtime: String,
+    pub model: Option<String>,
     pub workflow_instance_id: Option<String>,
     pub pid: Option<i64>,
     pub worktree_path: Option<String>,
@@ -40,6 +42,7 @@ impl AgentSession {
             slot_id: row.get("slot_id")?,
             workflow_instance_id: row.get("workflow_instance_id")?,
             runtime: row.get("runtime")?,
+            model: row.get("model").ok().unwrap_or(None),
             pid: row.get("pid")?,
             worktree_path: row.get("worktree_path")?,
             branch: row.get("branch")?,
@@ -55,9 +58,9 @@ impl AgentSession {
     pub fn create(conn: &Connection, input: &CreateAgentSession) -> Result<Self> {
         let id = Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO agent_sessions (id, team_id, slot_id, workflow_instance_id, runtime, pid, worktree_path, branch)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![id, input.team_id, input.slot_id, input.workflow_instance_id, input.runtime, input.pid, input.worktree_path, input.branch],
+            "INSERT INTO agent_sessions (id, team_id, slot_id, workflow_instance_id, runtime, model, pid, worktree_path, branch)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![id, input.team_id, input.slot_id, input.workflow_instance_id, input.runtime, input.model, input.pid, input.worktree_path, input.branch],
         )?;
         Self::get_by_id(conn, &id)
     }
@@ -166,6 +169,7 @@ mod tests {
             team_id: team.id.clone(),
             slot_id: slot.id.clone(),
             runtime: "claude".to_string(),
+            model: None,
             workflow_instance_id: None,
             pid: Some(1234),
             worktree_path: None,
@@ -187,6 +191,7 @@ mod tests {
             team_id: team.id.clone(),
             slot_id: slot.id.clone(),
             runtime: "claude".to_string(),
+            model: None,
             workflow_instance_id: None,
             pid: None,
             worktree_path: None,
@@ -205,6 +210,7 @@ mod tests {
             team_id: team.id.clone(),
             slot_id: slot.id.clone(),
             runtime: "claude".to_string(),
+            model: None,
             workflow_instance_id: None,
             pid: None,
             worktree_path: None,
@@ -223,6 +229,7 @@ mod tests {
             team_id: team.id.clone(),
             slot_id: slot.id.clone(),
             runtime: "claude".to_string(),
+            model: None,
             workflow_instance_id: None,
             pid: None,
             worktree_path: None,
@@ -241,6 +248,7 @@ mod tests {
             team_id: team.id.clone(),
             slot_id: slot.id.clone(),
             runtime: "claude".to_string(),
+            model: None,
             workflow_instance_id: None,
             pid: None,
             worktree_path: None,
