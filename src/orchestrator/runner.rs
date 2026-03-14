@@ -124,6 +124,43 @@ impl OrchestratorRunner {
         }
     }
 
+    // ── Worktree cleanup helper ──────────────────────────────────────
+
+    fn cleanup_agent_worktree(&self, agent_session_id: &str) {
+        let (worktree_path, branch, project_dir) = {
+            let conn = self.db.lock().unwrap();
+            match AgentSession::get_by_id(&conn, agent_session_id) {
+                Ok(session) => {
+                    let dir = Team::get_by_id(&conn, &session.team_id)
+                        .ok()
+                        .and_then(|t| Project::get_by_id(&conn, &t.project_id).ok())
+                        .map(|p| p.directory);
+                    (session.worktree_path, session.branch, dir)
+                }
+                Err(_) => return,
+            }
+        };
+        // Remove the worktree directory
+        if let Some(wt_path) = &worktree_path {
+            let path = std::path::Path::new(wt_path);
+            if path.exists() {
+                if let Err(e) = std::fs::remove_dir_all(path) {
+                    tracing::warn!(session = %agent_session_id, path = %wt_path, "Failed to remove worktree dir: {}", e);
+                } else {
+                    tracing::info!(session = %agent_session_id, path = %wt_path, "Cleaned up worktree directory");
+                }
+            }
+        }
+        // Prune the git worktree reference
+        if let (Some(branch), Some(dir)) = (branch, project_dir) {
+            let worktree_name = branch.replace('/', "-");
+            let _ = self.worktree_manager.remove_worktree(
+                std::path::Path::new(&dir),
+                &worktree_name,
+            );
+        }
+    }
+
     // ── Activity logging helper ──────────────────────────────────────
 
     fn log_activity(&self, event_type: &str, message: &str,
@@ -785,6 +822,7 @@ impl OrchestratorRunner {
                         metadata: None,
                     });
                 }
+                // Note: worktree cleanup happens after merge in sweep_merge_queue
                 to_remove.push(key.clone());
                 continue;
             }
@@ -792,6 +830,7 @@ impl OrchestratorRunner {
             // Check if agent process has exited
             let exit_status = self.process_manager.check_agent_exit(&ta.agent_session_id).await;
             if let Some(success) = exit_status {
+                let session_id_for_cleanup = ta.agent_session_id.clone();
                 self.process_manager.remove_agent(&ta.agent_session_id).await;
                 // If issue is still in_progress, agent exited without closing it —
                 // unclaim so it can be retried, regardless of exit code
@@ -824,6 +863,8 @@ impl OrchestratorRunner {
                         );
                     }
                 }
+                // Clean up worktree after handling the exit
+                self.cleanup_agent_worktree(&session_id_for_cleanup);
                 to_remove.push(key.clone());
                 continue;
             }
@@ -842,6 +883,7 @@ impl OrchestratorRunner {
                 .is_some();
             if !agent_exists {
                 // Agent removed (e.g. by WS handler) — unclaim issue and mark session failed
+                let session_id_for_wt = ta.agent_session_id.clone();
                 {
                     let conn = self.db.lock().unwrap();
                     let _ = Issue::unclaim(&conn, &ta.issue_id);
@@ -851,6 +893,7 @@ impl OrchestratorRunner {
                     team = %ta.team_id, role = %ta.role, issue = %ta.issue_id,
                     "Team agent PTY died — unclaiming issue"
                 );
+                self.cleanup_agent_worktree(&session_id_for_wt);
                 to_remove.push(key.clone());
                 continue;
             }
@@ -859,6 +902,7 @@ impl OrchestratorRunner {
             let idle_secs = ta.last_activity.elapsed().as_secs();
             if idle_secs >= KILL_THRESHOLD_SECS {
                 tracing::warn!(team = %ta.team_id, role = %ta.role, "Killing idle team agent");
+                let idle_session_id = ta.agent_session_id.clone();
                 let _ = self
                     .process_manager
                     .stop_agent(&ta.agent_session_id)
@@ -868,6 +912,7 @@ impl OrchestratorRunner {
                     let _ = Issue::unclaim(&conn, &ta.issue_id);
                     let _ = AgentSession::update_state(&conn, &ta.agent_session_id, "failed");
                 }
+                self.cleanup_agent_worktree(&idle_session_id);
                 to_remove.push(key.clone());
             } else if idle_secs >= NUDGE_WARNING_SECS && ta.nudge_count >= 1 {
                 let msg = "\n\nNo status update received. Please respond or your session will be terminated.\n";

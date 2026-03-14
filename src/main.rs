@@ -91,7 +91,7 @@ async fn main() {
     let (orch_tx, orch_rx) = tokio::sync::mpsc::channel(64);
     let orchestrator_handle = crate::orchestrator::runner::OrchestratorHandle::new(orch_tx);
 
-    let worktree_base = std::path::PathBuf::from("/tmp/ironweave-worktrees");
+    let worktree_base = std::path::PathBuf::from("/home/paddy/ironweave-worktrees");
     let mut orch_runner = crate::orchestrator::runner::OrchestratorRunner::new(
         orch_rx,
         db.clone(),
