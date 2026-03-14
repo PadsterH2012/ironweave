@@ -164,6 +164,9 @@ async fn main() {
         .route("/api/projects/{pid}/workflows", get(api::workflows::list_definitions).post(api::workflows::create_definition))
         .route("/api/projects/{pid}/workflows/{id}", get(api::workflows::get_definition))
         .route("/api/workflows/{wid}/instances", get(api::workflows::list_instances).post(api::workflows::create_instance))
+        .route("/api/workflows/{wid}/instances/{iid}/pause", post(api::workflows::pause_instance))
+        .route("/api/workflows/{wid}/instances/{iid}/resume", post(api::workflows::resume_instance))
+        .route("/api/workflows/{wid}/instances/{iid}/cancel", post(api::workflows::cancel_instance))
         .route("/api/workflows/{wid}/instances/{iid}/stages/{sid}/approve", post(api::workflows::approve_gate))
         // Dashboard
         .route("/api/dashboard", get(api::dashboard::stats))
@@ -205,12 +208,17 @@ async fn main() {
         // Merge queue
         .route("/api/projects/{pid}/merge-queue", get(api::merge_queue::list_queue))
         .route("/api/projects/{pid}/merge-queue/{id}/approve", post(api::merge_queue::approve_merge))
+        .route("/api/projects/{pid}/merge-queue/{id}/resolve", post(api::merge_queue::resolve))
+        .route("/api/projects/{pid}/merge-queue/{id}/diff", get(api::merge_queue::get_diff))
+        .route("/api/projects/{pid}/merge-queue/{id}/reject", post(api::merge_queue::reject))
         // Runtimes
         .route("/api/runtimes", get(api::runtimes::list))
         // Loom
         .route("/api/projects/{pid}/loom", get(api::loom::list_by_project))
         .route("/api/teams/{tid}/loom", get(api::loom::list_by_team))
-        .route("/api/loom", get(api::loom::list_recent).post(api::loom::create));
+        .route("/api/loom", get(api::loom::list_recent).post(api::loom::create))
+        // Swarm status
+        .route("/api/projects/{pid}/swarm-status", get(api::swarm::get_status));
 
     // Only add auth middleware if auth is configured
     if auth_config.is_some() {

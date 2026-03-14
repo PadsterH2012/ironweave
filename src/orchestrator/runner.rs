@@ -65,6 +65,7 @@ pub struct StageAgent {
     pub last_activity: Instant,
     pub nudge_count: u32,
     pub last_issue_updated_at: String,
+    pub retry_count: u8,
 }
 
 pub struct TeamDispatchedAgent {
@@ -87,6 +88,10 @@ pub struct WorkflowRunState {
     pub execution: DagExecutionState,
     pub stage_agents: HashMap<String, StageAgent>,
     pub state_machine: StateMachine,
+    /// Tracks retry counts per stage_id (persists across agent re-spawns)
+    pub stage_retry_counts: HashMap<String, u8>,
+    /// Stages pending retry — maps stage_id to issue_id for reuse
+    pub stages_pending_retry: HashMap<String, String>,
 }
 
 // ── OrchestratorRunner ─────────────────────────────────────────────────
@@ -330,6 +335,8 @@ impl OrchestratorRunner {
             execution,
             stage_agents: HashMap::new(),
             state_machine,
+            stage_retry_counts: HashMap::new(),
+            stages_pending_retry: HashMap::new(),
         };
 
         // Spawn agents for ready stages
@@ -383,8 +390,20 @@ impl OrchestratorRunner {
             return Ok(());
         }
 
-        // Create issue (bead) for this stage
-        let issue = {
+        // Reuse existing issue on retry, or create a new one
+        let issue = if let Some(retry_issue_id) = run_state.stages_pending_retry.remove(stage_id) {
+            // Retry case — reopen the existing issue
+            let conn = db.lock().unwrap();
+            let _ = Issue::update(
+                &conn,
+                &retry_issue_id,
+                &crate::models::issue::UpdateIssue {
+                    status: Some("open".to_string()),
+                    ..Default::default()
+                },
+            );
+            Issue::get_by_id(&conn, &retry_issue_id)?
+        } else {
             let conn = db.lock().unwrap();
             Issue::create(
                 &conn,
@@ -498,6 +517,11 @@ impl OrchestratorRunner {
         run_state
             .execution
             .update_stage(stage_id, StageStatus::Running);
+        let retry_count = run_state
+            .stage_retry_counts
+            .get(stage_id)
+            .copied()
+            .unwrap_or(0);
         run_state.stage_agents.insert(
             stage_id.to_string(),
             StageAgent {
@@ -507,6 +531,7 @@ impl OrchestratorRunner {
                 last_activity: Instant::now(),
                 nudge_count: 0,
                 last_issue_updated_at: String::new(),
+                retry_count,
             },
         );
 
@@ -649,18 +674,42 @@ impl OrchestratorRunner {
             tracing::info!(workflow = %instance_id, stage = %stage_id, "Stage completed");
         }
 
-        // 3. Mark failed stages and unclaim issues
+        // 3. Handle failed stages: retry once, then permanently fail
         for stage_id in &failed_stages {
-            run_state.execution.update_stage(
-                stage_id,
-                StageStatus::Failed("agent died or timed out".into()),
-            );
             if let Some(sa) = run_state.stage_agents.remove(stage_id) {
                 self.process_manager.remove_agent(&sa.agent_session_id).await;
                 let conn = self.db.lock().unwrap();
                 let _ = Issue::unclaim(&conn, &sa.issue_id);
+
+                let retries = run_state.stage_retry_counts.get(stage_id).copied().unwrap_or(0);
+                if retries < 1 {
+                    // First failure — reset to Pending for re-spawn on next sweep tick
+                    run_state
+                        .execution
+                        .update_stage(stage_id, StageStatus::Pending);
+                    run_state
+                        .stage_retry_counts
+                        .insert(stage_id.clone(), retries + 1);
+                    // Remember the issue_id so spawn_stage_agent can reuse it
+                    run_state
+                        .stages_pending_retry
+                        .insert(stage_id.clone(), sa.issue_id);
+                    tracing::warn!(
+                        workflow = %instance_id, stage = %stage_id,
+                        "Stage failed — scheduling retry (attempt 1/1)"
+                    );
+                } else {
+                    // Second failure — permanently fail the stage
+                    let reason = "agent died or timed out after retry".to_string();
+                    run_state
+                        .execution
+                        .update_stage(stage_id, StageStatus::Failed(reason));
+                    tracing::error!(
+                        workflow = %instance_id, stage = %stage_id,
+                        "Stage permanently failed after retry"
+                    );
+                }
             }
-            tracing::warn!(workflow = %instance_id, stage = %stage_id, "Stage failed");
         }
 
         // 4. Check for gate approvals from the database
@@ -862,6 +911,29 @@ impl OrchestratorRunner {
                     let _ = AgentSession::update_state(&conn, &ta.agent_session_id, state);
 
                     const MAX_RETRIES: i64 = 3;
+
+                    // If this was a merge_conflict resolver agent, escalate the merge queue entry
+                    if issue.issue_type == "merge_conflict" {
+                        use crate::models::merge_queue_entry::MergeQueueEntry;
+                        // Find the merge queue entry this resolver was working on
+                        let mut stmt = conn.prepare(
+                            "SELECT id FROM merge_queue WHERE resolver_agent_id = ?1 AND status = 'resolving'"
+                        ).ok();
+                        if let Some(ref mut stmt) = stmt {
+                            let entry_ids: Vec<String> = stmt.query_map(
+                                params![&ta.agent_session_id],
+                                |row| row.get(0),
+                            ).ok().map(|rows| rows.filter_map(|r| r.ok()).collect()).unwrap_or_default();
+                            for eid in &entry_ids {
+                                let _ = MergeQueueEntry::update_status(
+                                    &conn, eid, "escalated", None, None,
+                                    Some("Resolver agent failed — escalated to human review"),
+                                );
+                                tracing::warn!(entry_id = %eid, "Resolver failed — escalated merge queue entry");
+                            }
+                        }
+                    }
+
                     if issue.retry_count >= MAX_RETRIES {
                         // Max retries reached — mark as needs_investigation instead of retrying
                         let _ = conn.execute(
@@ -2003,24 +2075,92 @@ impl OrchestratorRunner {
                     };
 
                     if build_passed {
+                        // Code review gate: run Claude Sonnet review on the diff
                         {
                             let conn = self.db.lock().unwrap();
                             let _ = MergeQueueEntry::update_status(
-                                &conn, &entry.id, "merged", None, None, None,
+                                &conn, &entry.id, "reviewing", None, None, None,
                             );
                         }
                         self.log_activity(
-                            "merge_success",
-                            &format!("Merged branch '{}' into '{}'", entry.branch_name, target_branch),
+                            "code_review_start",
+                            &format!("Starting code review for branch '{}'", entry.branch_name),
                             Some(project_id), entry.team_id.as_deref(),
                             entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
                             None,
                         );
-                        let _ = self.worktree_manager.remove_worktree(
+
+                        let review_passed = match MergeQueueProcessor::review_code(
                             repo_path,
-                            &entry.branch_name.replace('/', "-"),
-                        );
-                        tracing::info!(branch = %entry.branch_name, "Merge successful");
+                            &entry.branch_name,
+                        ) {
+                            crate::worktree::merge_queue::CodeReviewResult::Pass => {
+                                tracing::info!(branch = %entry.branch_name, "Code review passed");
+                                true
+                            }
+                            crate::worktree::merge_queue::CodeReviewResult::Fail(feedback) => {
+                                tracing::warn!(
+                                    branch = %entry.branch_name,
+                                    "Code review rejected: {}", feedback
+                                );
+                                // Revert the merge
+                                if let Err(revert_err) = MergeQueueProcessor::revert_merge(
+                                    repo_path, &target_branch,
+                                ) {
+                                    tracing::error!("Failed to revert merge after review rejection: {}", revert_err);
+                                }
+                                {
+                                    let conn = self.db.lock().unwrap();
+                                    let _ = MergeQueueEntry::update_status(
+                                        &conn, &entry.id, "review_failed", None, None,
+                                        Some(&feedback[..feedback.len().min(1000)]),
+                                    );
+                                }
+                                self.log_activity(
+                                    "code_review_failed",
+                                    &format!("Code review rejected for branch '{}': {}", entry.branch_name, &feedback[..feedback.len().min(200)]),
+                                    Some(project_id), entry.team_id.as_deref(),
+                                    entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
+                                    None,
+                                );
+                                false
+                            }
+                            crate::worktree::merge_queue::CodeReviewResult::Error(err) => {
+                                tracing::error!(
+                                    branch = %entry.branch_name,
+                                    "Code review error (proceeding with merge): {}", err
+                                );
+                                self.log_activity(
+                                    "code_review_error",
+                                    &format!("Code review error for branch '{}': {} — proceeding with merge", entry.branch_name, &err[..err.len().min(200)]),
+                                    Some(project_id), entry.team_id.as_deref(),
+                                    entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
+                                    None,
+                                );
+                                true // Don't block merges if the review tool itself fails
+                            }
+                        };
+
+                        if review_passed {
+                            {
+                                let conn = self.db.lock().unwrap();
+                                let _ = MergeQueueEntry::update_status(
+                                    &conn, &entry.id, "merged", None, None, None,
+                                );
+                            }
+                            self.log_activity(
+                                "merge_success",
+                                &format!("Merged branch '{}' into '{}'", entry.branch_name, target_branch),
+                                Some(project_id), entry.team_id.as_deref(),
+                                entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
+                                None,
+                            );
+                            let _ = self.worktree_manager.remove_worktree(
+                                repo_path,
+                                &entry.branch_name.replace('/', "-"),
+                            );
+                            tracing::info!(branch = %entry.branch_name, "Merge successful");
+                        }
                     }
                 }
                 Ok(MergeResult::Conflict { files }) => {
@@ -2030,13 +2170,13 @@ impl OrchestratorRunner {
                         .collect::<Vec<_>>()
                         .join("\n");
 
-                    {
+                    // Create resolver issue and attempt auto-spawn
+                    let resolver_issue = {
                         let conn = self.db.lock().unwrap();
                         let _ = MergeQueueEntry::update_status(
                             &conn, &entry.id, "conflicted", Some(&conflict_json), None, None,
                         );
-                        // Create a resolver issue for the conflict
-                        let _ = Issue::create(&conn, &CreateIssue {
+                        Issue::create(&conn, &CreateIssue {
                             project_id: project_id.clone(),
                             issue_type: Some("merge_conflict".to_string()),
                             title: format!("Resolve merge conflicts: {}", entry.branch_name),
@@ -2052,8 +2192,69 @@ impl OrchestratorRunner {
                             parent_id: None,
                             needs_intake: Some(0),
                             scope_mode: None,
-                        });
+                        }).ok()
+                    };
+
+                    // Auto-spawn resolver agent (T1)
+                    if let Some(ref resolver_issue) = resolver_issue {
+                        if let Some(ref team_id) = entry.team_id {
+                            let spawn_result = {
+                                let team_and_slot = {
+                                    let conn = self.db.lock().unwrap();
+                                    Team::get_by_id(&conn, team_id).ok().and_then(|team| {
+                                        let slots = TeamAgentSlot::list_by_team(&conn, team_id).ok()?;
+                                        // Find a coder slot to use as resolver
+                                        let slot = slots.into_iter()
+                                            .find(|s| s.role.contains("coder"))
+                                            .or_else(|| {
+                                                let slots = TeamAgentSlot::list_by_team(&conn, team_id).ok()?;
+                                                slots.into_iter().next()
+                                            });
+                                        slot.map(|s| (team, s))
+                                    })
+                                };
+                                if let Some((team, slot)) = team_and_slot {
+                                    self.spawn_team_agent(&team, &slot, resolver_issue).await
+                                } else {
+                                    Err(crate::error::IronweaveError::Internal("No team/slot found for resolver".into()))
+                                }
+                            };
+
+                            match spawn_result {
+                                Ok(()) => {
+                                    // Find the agent session that was just spawned for this issue
+                                    let resolver_session_id = self.team_agents.values()
+                                        .find(|ta| ta.issue_id == resolver_issue.id)
+                                        .map(|ta| ta.agent_session_id.clone());
+                                    if let Some(ref sid) = resolver_session_id {
+                                        let conn = self.db.lock().unwrap();
+                                        let _ = MergeQueueEntry::update_status(
+                                            &conn, &entry.id, "resolving", None, Some(sid), None,
+                                        );
+                                    }
+                                    self.log_activity(
+                                        "resolver_spawned",
+                                        &format!("Auto-spawned resolver agent for branch '{}'", entry.branch_name),
+                                        Some(project_id), entry.team_id.as_deref(),
+                                        resolver_session_id.as_deref(), entry.issue_id.as_deref(),
+                                        None,
+                                    );
+                                    tracing::info!(branch = %entry.branch_name, "Resolver agent spawned");
+                                }
+                                Err(e) => {
+                                    tracing::error!(branch = %entry.branch_name, "Failed to spawn resolver: {}", e);
+                                    self.log_activity(
+                                        "resolver_spawn_failed",
+                                        &format!("Failed to auto-spawn resolver for '{}': {}", entry.branch_name, e),
+                                        Some(project_id), entry.team_id.as_deref(),
+                                        entry.agent_session_id.as_deref(), entry.issue_id.as_deref(),
+                                        None,
+                                    );
+                                }
+                            }
+                        }
                     }
+
                     self.log_activity(
                         "merge_conflict",
                         &format!("Merge conflict on branch '{}': {} file(s)", entry.branch_name, files.len()),

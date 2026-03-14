@@ -118,6 +118,10 @@ fn make_issue(conn: &Connection, project_id: &str, title: &str) -> Issue {
             depends_on: None,
             workflow_instance_id: None,
             stage_id: None,
+            role: None,
+            parent_id: None,
+            needs_intake: None,
+            scope_mode: None,
         },
     )
     .unwrap()
@@ -141,6 +145,10 @@ fn make_issue_with_deps(
             depends_on: Some(deps),
             workflow_instance_id: None,
             stage_id: None,
+            role: None,
+            parent_id: None,
+            needs_intake: None,
+            scope_mode: None,
         },
     )
     .unwrap()
@@ -859,4 +867,604 @@ fn merge_queue_conflict_detection() {
         }
         _ => panic!("Expected merge conflict"),
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. Coordination mode logic (pipeline, collaborative, hierarchical)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Helper: create an issue with a specific role and needs_intake = 0 (ready for dispatch).
+fn make_issue_for_role(
+    conn: &Connection,
+    project_id: &str,
+    title: &str,
+    role: &str,
+) -> Issue {
+    Issue::create(
+        conn,
+        &CreateIssue {
+            project_id: project_id.to_string(),
+            issue_type: Some("task".to_string()),
+            title: title.to_string(),
+            description: None,
+            priority: Some(5),
+            depends_on: None,
+            workflow_instance_id: None,
+            stage_id: None,
+            role: Some(role.to_string()),
+            parent_id: None,
+            needs_intake: Some(0),
+            scope_mode: None,
+        },
+    )
+    .unwrap()
+}
+
+/// Helper: create a child issue (parent_id set) for hierarchical mode.
+fn make_child_issue(
+    conn: &Connection,
+    project_id: &str,
+    title: &str,
+    role: &str,
+    parent_id: &str,
+) -> Issue {
+    Issue::create(
+        conn,
+        &CreateIssue {
+            project_id: project_id.to_string(),
+            issue_type: Some("task".to_string()),
+            title: title.to_string(),
+            description: None,
+            priority: Some(5),
+            depends_on: None,
+            workflow_instance_id: None,
+            stage_id: None,
+            role: Some(role.to_string()),
+            parent_id: Some(parent_id.to_string()),
+            needs_intake: Some(0),
+            scope_mode: None,
+        },
+    )
+    .unwrap()
+}
+
+/// Helper: create a team with a specific coordination mode.
+fn make_team_with_mode(conn: &Connection, project: &Project, mode: &str) -> Team {
+    Team::create(
+        conn,
+        &CreateTeam {
+            name: format!("team-{}-{}", mode, uuid::Uuid::new_v4()),
+            project_id: project.id.clone(),
+            coordination_mode: Some(mode.to_string()),
+            max_agents: None,
+            token_budget: None,
+            cost_budget_daily: None,
+            is_template: None,
+        },
+    )
+    .unwrap()
+}
+
+// ── Pipeline coordination ────────────────────────────────────────────────
+
+#[test]
+fn pipeline_only_current_stage_role_gets_issues() {
+    let conn = setup_db();
+    let project = make_project(&conn);
+    let team = make_team_with_mode(&conn, &project, "pipeline");
+
+    // Create slots: coder (order 1) → tester (order 2) → reviewer (order 3)
+    TeamAgentSlot::create(&conn, &CreateTeamAgentSlot {
+        team_id: team.id.clone(),
+        role: "senior_coder".to_string(),
+        runtime: "claude".to_string(),
+        model: None, config: None,
+        slot_order: Some(1),
+        is_lead: None,
+    }).unwrap();
+    TeamAgentSlot::create(&conn, &CreateTeamAgentSlot {
+        team_id: team.id.clone(),
+        role: "senior_tester".to_string(),
+        runtime: "claude".to_string(),
+        model: None, config: None,
+        slot_order: Some(2),
+        is_lead: None,
+    }).unwrap();
+    TeamAgentSlot::create(&conn, &CreateTeamAgentSlot {
+        team_id: team.id.clone(),
+        role: "reviewer".to_string(),
+        runtime: "claude".to_string(),
+        model: None, config: None,
+        slot_order: Some(3),
+        is_lead: None,
+    }).unwrap();
+
+    // Create issues for coder and tester roles
+    let coder_issue = make_issue_for_role(&conn, &project.id, "Implement auth", "senior_coder");
+    let tester_issue = make_issue_for_role(&conn, &project.id, "Test auth", "senior_tester");
+
+    // Pipeline stage 1: coder issues are ready, tester issues should NOT be dispatched
+    let pickup_types = vec!["task"];
+    let coder_ready = Issue::get_ready_by_role(&conn, &project.id, "senior_coder", &pickup_types).unwrap();
+    let tester_ready = Issue::get_ready_by_role(&conn, &project.id, "senior_tester", &pickup_types).unwrap();
+
+    assert!(!coder_ready.is_empty(), "Coder should have ready issues");
+    assert!(!tester_ready.is_empty(), "Tester issues exist but pipeline should block dispatch");
+
+    // The pipeline logic checks: are there open/in_progress issues for the earlier role?
+    // If coder has open issues → tester stage is blocked (enforced by dispatch_pipeline, not the query)
+    let coder_has_open: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM issues WHERE project_id = ?1 \
+         AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+         AND status IN ('open', 'in_progress') AND needs_intake = 0",
+        rusqlite::params![project.id, "senior_coder"],
+        |row| row.get(0),
+    ).unwrap();
+    assert!(coder_has_open > 0, "Coder stage has open issues → pipeline blocks later stages");
+
+    // Close the coder issue → tester stage should become current
+    conn.execute(
+        "UPDATE issues SET status = 'closed' WHERE id = ?1",
+        rusqlite::params![coder_issue.id],
+    ).unwrap();
+
+    let coder_has_open_after: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM issues WHERE project_id = ?1 \
+         AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+         AND status IN ('open', 'in_progress') AND needs_intake = 0",
+        rusqlite::params![project.id, "senior_coder"],
+        |row| row.get(0),
+    ).unwrap();
+    assert_eq!(coder_has_open_after, 0, "Coder stage should have no open issues");
+
+    // Now tester is the current stage
+    let tester_has_open: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM issues WHERE project_id = ?1 \
+         AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+         AND status IN ('open', 'in_progress') AND needs_intake = 0",
+        rusqlite::params![project.id, "senior_tester"],
+        |row| row.get(0),
+    ).unwrap();
+    assert!(tester_has_open > 0, "Tester stage should now be the current pipeline stage");
+}
+
+// ── Collaborative coordination ───────────────────────────────────────────
+
+#[test]
+fn collaborative_clone_issues_have_correct_parent() {
+    let conn = setup_db();
+    let project = make_project(&conn);
+    let team = make_team_with_mode(&conn, &project, "collaborative");
+
+    // Create multiple slots for the collaborative team
+    TeamAgentSlot::create(&conn, &CreateTeamAgentSlot {
+        team_id: team.id.clone(),
+        role: "senior_coder".to_string(),
+        runtime: "claude".to_string(),
+        model: None, config: None,
+        slot_order: Some(1),
+        is_lead: None,
+    }).unwrap();
+    TeamAgentSlot::create(&conn, &CreateTeamAgentSlot {
+        team_id: team.id.clone(),
+        role: "senior_coder".to_string(),
+        runtime: "opencode".to_string(),
+        model: None, config: None,
+        slot_order: Some(2),
+        is_lead: None,
+    }).unwrap();
+
+    // Create a source issue
+    let source = make_issue_for_role(&conn, &project.id, "Implement search", "senior_coder");
+    assert!(source.parent_id.is_none(), "Source issue should have no parent");
+
+    // Simulate collaborative dispatch: create a clone issue with parent_id
+    let clone = Issue::create(&conn, &CreateIssue {
+        project_id: project.id.clone(),
+        issue_type: Some("task".to_string()),
+        title: format!("{} [collaborative: senior_coder]", source.title),
+        description: Some(source.description.clone()),
+        priority: Some(source.priority),
+        depends_on: None,
+        workflow_instance_id: None,
+        stage_id: None,
+        role: Some("senior_coder".to_string()),
+        parent_id: Some(source.id.clone()),
+        needs_intake: Some(0),
+        scope_mode: Some("auto".to_string()),
+    }).unwrap();
+
+    assert_eq!(clone.parent_id.as_deref(), Some(source.id.as_str()),
+        "Clone should reference source as parent");
+
+    // Get children of source
+    let children = Issue::get_children(&conn, &source.id).unwrap();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].id, clone.id);
+    assert!(children[0].title.contains("[collaborative:"));
+}
+
+// ── Hierarchical coordination ────────────────────────────────────────────
+
+#[test]
+fn hierarchical_lead_gets_top_level_workers_get_children() {
+    let conn = setup_db();
+    let project = make_project(&conn);
+    let team = make_team_with_mode(&conn, &project, "hierarchical");
+
+    // Create slots: lead architect + worker coders
+    let lead_slot = TeamAgentSlot::create(&conn, &CreateTeamAgentSlot {
+        team_id: team.id.clone(),
+        role: "architect".to_string(),
+        runtime: "claude".to_string(),
+        model: None, config: None,
+        slot_order: Some(1),
+        is_lead: Some(true),
+    }).unwrap();
+    let worker_slot = TeamAgentSlot::create(&conn, &CreateTeamAgentSlot {
+        team_id: team.id.clone(),
+        role: "senior_coder".to_string(),
+        runtime: "claude".to_string(),
+        model: None, config: None,
+        slot_order: Some(2),
+        is_lead: Some(false),
+    }).unwrap();
+
+    assert!(lead_slot.is_lead, "Lead slot should have is_lead = true");
+    assert!(!worker_slot.is_lead, "Worker slot should have is_lead = false");
+
+    // Create a top-level issue (no parent) for the architect
+    let top_level = make_issue_for_role(&conn, &project.id, "Design API", "architect");
+    assert!(top_level.parent_id.is_none());
+
+    // Hierarchical query for lead: parent_id IS NULL
+    let lead_query: Option<String> = conn.query_row(
+        "SELECT id FROM issues WHERE project_id = ?1 \
+         AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+         AND status = 'open' AND claimed_by IS NULL \
+         AND parent_id IS NULL AND needs_intake = 0 \
+         ORDER BY priority, created_at LIMIT 1",
+        rusqlite::params![project.id, "architect"],
+        |row| row.get(0),
+    ).ok();
+    assert_eq!(lead_query.as_deref(), Some(top_level.id.as_str()),
+        "Lead should find the top-level issue");
+
+    // Worker query: parent_id IS NOT NULL — should find nothing yet
+    let worker_query: Option<String> = conn.query_row(
+        "SELECT id FROM issues WHERE project_id = ?1 \
+         AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+         AND status = 'open' AND claimed_by IS NULL \
+         AND parent_id IS NOT NULL AND needs_intake = 0 \
+         ORDER BY priority, created_at LIMIT 1",
+        rusqlite::params![project.id, "senior_coder"],
+        |row| row.get::<_, String>(0),
+    ).ok();
+    assert!(worker_query.is_none(), "Workers should have no tasks before lead decomposes");
+
+    // Simulate lead decomposing the top-level issue into child tasks
+    let child1 = make_child_issue(&conn, &project.id, "Implement GET /users", "senior_coder", &top_level.id);
+    let child2 = make_child_issue(&conn, &project.id, "Implement POST /users", "senior_coder", &top_level.id);
+
+    // Now workers should find child issues
+    let worker_query_after: Option<String> = conn.query_row(
+        "SELECT id FROM issues WHERE project_id = ?1 \
+         AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+         AND status = 'open' AND claimed_by IS NULL \
+         AND parent_id IS NOT NULL AND needs_intake = 0 \
+         ORDER BY priority, created_at LIMIT 1",
+        rusqlite::params![project.id, "senior_coder"],
+        |row| row.get::<_, String>(0),
+    ).ok();
+    assert!(worker_query_after.is_some(), "Workers should now find child issues");
+
+    // Workers should NOT see top-level issues (even if they share the role)
+    let top_issue_for_coder = make_issue_for_role(&conn, &project.id, "Top level coder task", "senior_coder");
+    // The hierarchical worker query uses parent_id IS NOT NULL, so this top-level issue is excluded
+    let mut stmt = conn.prepare(
+        "SELECT id FROM issues WHERE project_id = ?1 \
+         AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+         AND status = 'open' AND claimed_by IS NULL \
+         AND parent_id IS NOT NULL AND needs_intake = 0 \
+         ORDER BY priority, created_at"
+    ).unwrap();
+    let worker_issues: Vec<String> = stmt.query_map(
+        rusqlite::params![project.id, "senior_coder"],
+        |row| row.get(0),
+    ).unwrap().filter_map(|r| r.ok()).collect();
+
+    assert!(!worker_issues.contains(&top_issue_for_coder.id),
+        "Worker query must exclude top-level issues (parent_id IS NULL)");
+    assert!(worker_issues.contains(&child1.id));
+    assert!(worker_issues.contains(&child2.id));
+}
+
+#[test]
+fn hierarchical_lead_cannot_see_child_issues() {
+    let conn = setup_db();
+    let project = make_project(&conn);
+
+    // Create a top-level issue and a child issue, both with architect role
+    let top_level = make_issue_for_role(&conn, &project.id, "Design system", "architect");
+    let _child = make_child_issue(&conn, &project.id, "Design subsystem", "architect", &top_level.id);
+
+    // Lead query: parent_id IS NULL — should only return top-level
+    let mut stmt = conn.prepare(
+        "SELECT id FROM issues WHERE project_id = ?1 \
+         AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+         AND status = 'open' AND claimed_by IS NULL \
+         AND parent_id IS NULL AND needs_intake = 0 \
+         ORDER BY priority, created_at"
+    ).unwrap();
+    let lead_issues: Vec<String> = stmt.query_map(
+        rusqlite::params![project.id, "architect"],
+        |row| row.get(0),
+    ).unwrap().filter_map(|r| r.ok()).collect();
+
+    assert_eq!(lead_issues.len(), 1);
+    assert_eq!(lead_issues[0], top_level.id,
+        "Lead should only see top-level issues, not children");
+}
+
+// ── Coordination mode stored on team ─────────────────────────────────────
+
+#[test]
+fn team_coordination_mode_persists() {
+    let conn = setup_db();
+    let project = make_project(&conn);
+
+    let pipeline_team = make_team_with_mode(&conn, &project, "pipeline");
+    let collab_team = make_team_with_mode(&conn, &project, "collaborative");
+    let hier_team = make_team_with_mode(&conn, &project, "hierarchical");
+    let swarm_team = make_team_with_mode(&conn, &project, "swarm");
+
+    assert_eq!(pipeline_team.coordination_mode, "pipeline");
+    assert_eq!(collab_team.coordination_mode, "collaborative");
+    assert_eq!(hier_team.coordination_mode, "hierarchical");
+    assert_eq!(swarm_team.coordination_mode, "swarm");
+
+    // Reload from DB
+    let reloaded = Team::get_by_id(&conn, &pipeline_team.id).unwrap();
+    assert_eq!(reloaded.coordination_mode, "pipeline");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DAG Execution Loop
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Linear 3-stage DAG completes in order: A -> B -> C.
+/// Each stage must become ready only after its predecessor completes.
+#[test]
+fn dag_linear_three_stage_completes_in_order() {
+    let dag = DagDefinition {
+        stages: vec![
+            make_stage("A", vec![], false),
+            make_stage("B", vec!["A"], false),
+            make_stage("C", vec!["B"], false),
+        ],
+    };
+    dag.validate().unwrap();
+    let mut exec = DagExecutionState::new(&dag).unwrap();
+
+    // Tier 0: only A is ready
+    let ready = exec.ready_stages();
+    assert_eq!(ready, vec!["A"]);
+    assert!(exec.ready_stages().iter().all(|s| s == "A"));
+
+    // Simulate A running and completing
+    exec.update_stage("A", StageStatus::Running);
+    assert!(exec.ready_stages().is_empty());
+    exec.update_stage("A", StageStatus::Completed);
+
+    // Tier 1: only B is ready
+    let ready = exec.ready_stages();
+    assert_eq!(ready, vec!["B"]);
+
+    exec.update_stage("B", StageStatus::Running);
+    exec.update_stage("B", StageStatus::Completed);
+
+    // Tier 2: only C is ready
+    let ready = exec.ready_stages();
+    assert_eq!(ready, vec!["C"]);
+
+    exec.update_stage("C", StageStatus::Running);
+    exec.update_stage("C", StageStatus::Completed);
+
+    assert!(exec.is_complete());
+    // All stages completed
+    assert!(exec.stage_statuses.values().all(|s| *s == StageStatus::Completed));
+}
+
+/// Two stages in the same tier are both ready before either completes.
+#[test]
+fn dag_parallel_stages_both_ready_in_same_tier() {
+    let dag = DagDefinition {
+        stages: vec![
+            make_stage("root", vec![], false),
+            make_stage("left", vec!["root"], false),
+            make_stage("right", vec!["root"], false),
+            make_stage("join", vec!["left", "right"], false),
+        ],
+    };
+    dag.validate().unwrap();
+    let mut exec = DagExecutionState::new(&dag).unwrap();
+
+    // Complete root
+    exec.update_stage("root", StageStatus::Running);
+    exec.update_stage("root", StageStatus::Completed);
+
+    // Both left and right should be ready simultaneously
+    let mut ready = exec.ready_stages();
+    ready.sort();
+    assert_eq!(ready, vec!["left", "right"]);
+
+    // Start both — join should NOT be ready yet
+    exec.update_stage("left", StageStatus::Running);
+    exec.update_stage("right", StageStatus::Running);
+    assert!(exec.ready_stages().is_empty());
+
+    // Complete left — join still not ready (right still running)
+    exec.update_stage("left", StageStatus::Completed);
+    assert!(exec.ready_stages().is_empty());
+
+    // Complete right — now join is ready
+    exec.update_stage("right", StageStatus::Completed);
+    assert_eq!(exec.ready_stages(), vec!["join"]);
+
+    exec.update_stage("join", StageStatus::Running);
+    exec.update_stage("join", StageStatus::Completed);
+    assert!(exec.is_complete());
+}
+
+/// Manual gate stage pauses tier advancement until approve_gate is called.
+#[test]
+fn dag_manual_gate_blocks_until_approved() {
+    let dag = DagDefinition {
+        stages: vec![
+            make_stage("build", vec![], false),
+            make_stage("review_gate", vec!["build"], true),
+            make_stage("deploy", vec!["review_gate"], false),
+        ],
+    };
+    dag.validate().unwrap();
+    let mut exec = DagExecutionState::new(&dag).unwrap();
+
+    // Complete build
+    exec.update_stage("build", StageStatus::Running);
+    exec.update_stage("build", StageStatus::Completed);
+
+    // review_gate becomes ready
+    assert_eq!(exec.ready_stages(), vec!["review_gate"]);
+
+    // Orchestrator would check is_manual_gate and set WaitingApproval
+    exec.update_stage("review_gate", StageStatus::WaitingApproval);
+
+    // Nothing should be ready while gate is waiting
+    assert!(exec.ready_stages().is_empty());
+    assert_eq!(exec.has_pending_approvals(), vec!["review_gate"]);
+
+    // deploy should NOT be ready
+    assert!(!exec.ready_stages().contains(&"deploy".to_string()));
+
+    // Approve the gate
+    exec.approve_gate("review_gate").unwrap();
+
+    // Gate is now Running (approve moves to Running)
+    // Simulate gate completing
+    exec.update_stage("review_gate", StageStatus::Completed);
+
+    // deploy should now be ready
+    assert_eq!(exec.ready_stages(), vec!["deploy"]);
+}
+
+/// Stage failure triggers one retry; second failure marks workflow Failed.
+/// Uses StateMachine to verify the workflow-level state transitions.
+#[test]
+fn dag_stage_failure_retry_then_permanent_fail() {
+    let db = setup_db_arc();
+    insert_workflow_instance(&db, "retry-wf", "pending");
+
+    let dag = DagDefinition {
+        stages: vec![
+            make_stage("A", vec![], false),
+            make_stage("B", vec!["A"], false),
+        ],
+    };
+    let mut exec = DagExecutionState::new(&dag).unwrap();
+    let mut sm = StateMachine::new("retry-wf".to_string(), db.clone());
+    sm.transition(WorkflowState::Running).unwrap();
+
+    // Complete stage A
+    exec.update_stage("A", StageStatus::Running);
+    exec.update_stage("A", StageStatus::Completed);
+    assert_eq!(exec.ready_stages(), vec!["B"]);
+
+    // Stage B first failure — should be reset to Pending for retry
+    exec.update_stage("B", StageStatus::Running);
+    // Simulate failure: reset to Pending (retry logic)
+    exec.update_stage("B", StageStatus::Pending);
+
+    // B should be ready again (retry)
+    assert_eq!(exec.ready_stages(), vec!["B"]);
+
+    // Stage B second failure — permanently fail
+    exec.update_stage("B", StageStatus::Running);
+    exec.update_stage("B", StageStatus::Failed("agent died after retry".into()));
+
+    // Workflow should be complete (A=Completed, B=Failed)
+    assert!(exec.is_complete());
+
+    // Not all succeeded
+    let all_succeeded = exec.stage_statuses.values()
+        .all(|s| matches!(s, StageStatus::Completed));
+    assert!(!all_succeeded);
+
+    // Transition workflow to Failed
+    sm.transition(WorkflowState::Failed).unwrap();
+    assert_eq!(sm.state(), WorkflowState::Failed);
+}
+
+/// Crash-recovery: restore DagExecutionState from checkpoint JSON and resume
+/// from the correct tier.
+#[test]
+fn dag_crash_recovery_resumes_from_checkpoint() {
+    let db = setup_db_arc();
+    insert_workflow_instance(&db, "crash-wf", "pending");
+
+    let dag = DagDefinition {
+        stages: vec![
+            make_stage("step1", vec![], false),
+            make_stage("step2", vec!["step1"], false),
+            make_stage("step3", vec!["step2"], false),
+        ],
+    };
+    let mut exec = DagExecutionState::new(&dag).unwrap();
+    let mut sm = StateMachine::new("crash-wf".to_string(), db.clone());
+    sm.transition(WorkflowState::Running).unwrap();
+
+    // Complete step1, start step2
+    exec.update_stage("step1", StageStatus::Completed);
+    exec.update_stage("step2", StageStatus::Running);
+
+    // Checkpoint the current state (simulating what the orchestrator does)
+    let checkpoint = serde_json::to_value(&exec).unwrap();
+    sm.checkpoint(checkpoint.clone()).unwrap();
+
+    // --- Simulate crash: drop exec and sm, restore from DB ---
+    drop(sm);
+
+    let restored_sm = StateMachine::restore(db.clone(), "crash-wf").unwrap();
+    assert_eq!(restored_sm.state(), WorkflowState::Running);
+
+    // Restore execution state from checkpoint
+    let restored_checkpoint = restored_sm.checkpoint_data().unwrap();
+    let mut restored_exec: DagExecutionState =
+        serde_json::from_value(restored_checkpoint.clone()).unwrap();
+    restored_exec.restore_dag().unwrap();
+
+    // Verify state: step1 = Completed, step2 = Running, step3 = Pending
+    assert_eq!(
+        restored_exec.stage_statuses.get("step1"),
+        Some(&StageStatus::Completed)
+    );
+    assert_eq!(
+        restored_exec.stage_statuses.get("step2"),
+        Some(&StageStatus::Running)
+    );
+    assert_eq!(
+        restored_exec.stage_statuses.get("step3"),
+        Some(&StageStatus::Pending)
+    );
+
+    // No new stages should be ready (step2 still running)
+    assert!(restored_exec.ready_stages().is_empty());
+
+    // Complete step2 — step3 becomes ready
+    restored_exec.update_stage("step2", StageStatus::Completed);
+    assert_eq!(restored_exec.ready_stages(), vec!["step3"]);
+
+    // Complete step3
+    restored_exec.update_stage("step3", StageStatus::Running);
+    restored_exec.update_stage("step3", StageStatus::Completed);
+    assert!(restored_exec.is_complete());
 }

@@ -28,6 +28,10 @@
   import ProjectSettings from '../lib/components/ProjectSettings.svelte';
   import MergeQueue from '../lib/components/MergeQueue.svelte';
   import DagGraph from '../lib/components/DagGraph.svelte';
+  import WorkflowRunner from '../lib/components/WorkflowRunner.svelte';
+  import SwarmStatus from '../lib/components/SwarmStatus.svelte';
+  import LoomFeed from '../lib/components/LoomFeed.svelte';
+  import { loom, type LoomEntry } from '../lib/api';
 
   interface Props {
     params: { id: string };
@@ -39,6 +43,7 @@
   let workflowDefs: WorkflowDefinition[] = $state([]);
   let error: string | null = $state(null);
   let activeTab: string = $state('teams');
+  let loomEntries: LoomEntry[] = $state([]);
 
   let showIntakeChat: boolean = $state(false);
 
@@ -88,6 +93,7 @@
     { key: 'issues', label: 'Issues' },
     { key: 'workflows', label: 'Workflows' },
     { key: 'merge-queue', label: 'Merge Queue' },
+    { key: 'loom', label: 'Loom' },
     { key: 'files', label: 'Files' },
     ...(project?.mount_id ? [{ key: 'history', label: 'History' }] : []),
     { key: 'settings', label: 'Settings' },
@@ -185,6 +191,12 @@
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to fetch slots';
     }
+  }
+
+  async function fetchLoom() {
+    try {
+      loomEntries = await loom.byProject(params.id, 100);
+    } catch { /* ignore */ }
   }
 
   function toggleTeamExpand(teamId: string) {
@@ -299,6 +311,7 @@
         }
       });
       fetchWorkflows();
+      fetchLoom();
     }
   });
 
@@ -979,90 +992,33 @@
             {/each}
           </div>
         {/if}
+
+        <!-- Swarm Status -->
+        <div class="border-t border-gray-800 pt-6 mt-6">
+          <SwarmStatus projectId={params.id} />
+        </div>
       </div>
     {:else if activeTab === 'issues'}
       <IssueBoard projectId={params.id} />
     {:else if activeTab === 'workflows'}
+      <WorkflowRunner projectId={params.id} />
+    {:else if activeTab === 'loom'}
       <div class="space-y-4">
-        <h2 class="text-lg font-semibold text-white">Workflow Definitions</h2>
-
-        {#if workflowDefs.length === 0}
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-white">Loom Feed</h2>
+          <button
+            onclick={fetchLoom}
+            class="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            Refresh
+          </button>
+        </div>
+        {#if loomEntries.length === 0}
           <div class="rounded-xl bg-gray-900 border border-gray-800 p-8 text-center text-gray-500">
-            No workflow definitions yet.
+            No loom entries yet.
           </div>
         {:else}
-          <div class="space-y-4">
-            {#each workflowDefs as wf (wf.id)}
-              {@const latestInstance = getLatestInstance(wf.id)}
-              {@const stages = parseDagStages(wf.dag)}
-              {@const stageStatuses = parseStageStatuses(latestInstance)}
-              {@const waitingStages = getWaitingApprovalStages(stageStatuses)}
-              <div class="rounded-xl bg-gray-900 border border-gray-800 space-y-0 {expandedWorkflowId === wf.id ? 'border-purple-800' : ''}">
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div
-                  class="p-4 space-y-2 cursor-pointer hover:bg-gray-800/50 transition-colors"
-                  onclick={() => { expandedWorkflowId = expandedWorkflowId === wf.id ? null : wf.id; }}
-                >
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-3">
-                      <h3 class="text-sm font-semibold text-white">{wf.name}</h3>
-                      <span class="text-xs text-gray-500">v{wf.version}</span>
-                      {#if wf.git_sha}
-                        <span class="text-xs text-gray-500 font-mono">{wf.git_sha.slice(0, 7)}</span>
-                      {/if}
-                      {#if latestInstance}
-                        <span class="text-[10px] font-medium px-2 py-0.5 rounded-full {stateBadge(latestInstance.state)}">
-                          {latestInstance.state}
-                        </span>
-                      {/if}
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <button
-                        onclick={(e) => { e.stopPropagation(); handleStartWorkflow(wf); }}
-                        disabled={startingWorkflow === wf.id}
-                        class="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white transition-colors"
-                      >
-                        {startingWorkflow === wf.id ? 'Starting...' : 'Start'}
-                      </button>
-                      <button
-                        onclick={(e) => { e.stopPropagation(); push(`/projects/${params.id}/workflows/${wf.id}`); }}
-                        class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
-                      >
-                        Details
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {#if expandedWorkflowId === wf.id && stages.length > 0}
-                  <div class="border-t border-gray-800 p-4 space-y-3">
-                    <div class="h-[400px]">
-                      <DagGraph {stages} {stageStatuses} />
-                    </div>
-
-                    {#if waitingStages.length > 0 && latestInstance}
-                      <div class="border-t border-gray-800 pt-3 space-y-2">
-                        <h4 class="text-xs font-medium text-yellow-400 uppercase tracking-wider">Pending Approvals</h4>
-                        <div class="flex flex-wrap gap-2">
-                          {#each waitingStages as stageId}
-                            {@const stageName = stages.find(s => s.id === stageId)?.name ?? stageId}
-                            <button
-                              onclick={() => handleApproveGate(wf, latestInstance.id, stageId)}
-                              disabled={approvingGate === stageId}
-                              class="px-3 py-1.5 text-xs font-medium rounded-lg bg-yellow-600 hover:bg-yellow-500 disabled:bg-gray-700 disabled:text-gray-500 text-white transition-colors"
-                            >
-                              {approvingGate === stageId ? 'Approving...' : `Approve: ${stageName}`}
-                            </button>
-                          {/each}
-                        </div>
-                      </div>
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-            {/each}
-          </div>
+          <LoomFeed entries={loomEntries} />
         {/if}
       </div>
     {:else if activeTab === 'merge-queue'}

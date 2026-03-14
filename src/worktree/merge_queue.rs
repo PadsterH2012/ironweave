@@ -12,6 +12,12 @@ pub enum BuildVerifyResult {
     Fail(String),
 }
 
+pub enum CodeReviewResult {
+    Pass,
+    Fail(String),
+    Error(String),
+}
+
 pub struct MergeQueueProcessor;
 
 impl MergeQueueProcessor {
@@ -142,6 +148,103 @@ impl MergeQueueProcessor {
                     BuildVerifyResult::Fail(format!("cargo check failed:\n{}", stdout.trim()))
                 }
             }
+        }
+    }
+
+    /// Get the diff of changes introduced by the most recent merge commit.
+    pub fn get_merge_diff(repo_path: &Path) -> Result<String, String> {
+        Self::git(repo_path, &["diff", "HEAD~1..HEAD"])
+    }
+
+    /// Run a code review using Claude Sonnet on the merged diff.
+    /// Returns Ok(true) if approved, Ok(false) if rejected with feedback.
+    pub fn review_code(
+        repo_path: &Path,
+        branch_name: &str,
+    ) -> CodeReviewResult {
+        let diff = match Self::get_merge_diff(repo_path) {
+            Ok(d) if d.is_empty() => return CodeReviewResult::Pass,
+            Ok(d) => d,
+            Err(e) => return CodeReviewResult::Error(format!("Failed to get diff: {}", e)),
+        };
+
+        // Truncate very large diffs to avoid token limits
+        let diff_for_review = if diff.len() > 50_000 {
+            format!("{}...\n[TRUNCATED — diff too large, showing first 50k chars]", &diff[..50_000])
+        } else {
+            diff.clone()
+        };
+
+        let prompt = format!(
+            r#"You are a senior code reviewer for a Rust + Svelte project called Ironweave.
+
+Review the following git diff from branch '{}'. Focus on:
+1. Correctness — logic errors, off-by-one, null/unwrap safety
+2. Security — injection, unsafe unwraps on user input, leaked secrets
+3. Breaking changes — API contract changes, removed public functions
+4. Compilation — obvious type errors, missing imports
+
+Do NOT flag: style preferences, naming conventions, missing docs, test coverage.
+
+If the code is acceptable, respond with exactly: REVIEW_VERDICT: APPROVE
+If there are blocking issues, respond with: REVIEW_VERDICT: REJECT
+Then list each issue on its own line starting with "- "
+
+Git diff:
+```
+{}
+```"#,
+            branch_name, diff_for_review
+        );
+
+        let result = Command::new("claude")
+            .args(["-p", "--model", "claude-sonnet-4-6", "--output-format", "text"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .current_dir(repo_path)
+            .spawn();
+
+        let mut child = match result {
+            Ok(c) => c,
+            Err(e) => return CodeReviewResult::Error(format!("Failed to spawn claude: {}", e)),
+        };
+
+        // Write prompt to stdin
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = stdin.write_all(prompt.as_bytes());
+        }
+
+        let output = match child.wait_with_output() {
+            Ok(o) => o,
+            Err(e) => return CodeReviewResult::Error(format!("Claude process failed: {}", e)),
+        };
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return CodeReviewResult::Error(format!("Claude exited with error: {}", stderr.trim()));
+        }
+
+        let review_text = String::from_utf8_lossy(&output.stdout).to_string();
+
+        if review_text.contains("REVIEW_VERDICT: APPROVE") {
+            CodeReviewResult::Pass
+        } else if review_text.contains("REVIEW_VERDICT: REJECT") {
+            // Extract the issues after the verdict line
+            let feedback = review_text
+                .lines()
+                .skip_while(|l| !l.contains("REVIEW_VERDICT: REJECT"))
+                .skip(1)
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim()
+                .to_string();
+            CodeReviewResult::Fail(feedback)
+        } else {
+            // No clear verdict — treat as pass with warning
+            tracing::warn!("Code review returned no clear verdict, treating as pass");
+            CodeReviewResult::Pass
         }
     }
 

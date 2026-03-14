@@ -13,6 +13,8 @@
   import ActivityFeed from '../lib/components/ActivityFeed.svelte';
   import LoomFeed from '../lib/components/LoomFeed.svelte';
   import MetricsChart from '../lib/components/MetricsChart.svelte';
+  import AgentUtilChart from '../lib/components/AgentUtilChart.svelte';
+  import MergeHealthChart from '../lib/components/MergeHealthChart.svelte';
   import SystemHealthPanel from '../lib/components/SystemHealth.svelte';
 
   let stats: DashboardStats | null = $state(null);
@@ -167,6 +169,21 @@
       {/if}
     </div>
   </div>
+
+  <!-- D3 Charts: Agent Activity + Merge Health -->
+  {#if metricsData}
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="lg:col-span-2">
+        <AgentUtilChart daily={metricsData.daily} />
+      </div>
+      <MergeHealthChart
+        total={metricsData.merge_stats.total}
+        clean={metricsData.merge_stats.clean}
+        conflicted={metricsData.merge_stats.conflicted}
+        escalated={metricsData.merge_stats.escalated}
+      />
+    </div>
+  {/if}
 
   <!-- Loom Feed -->
   <LoomFeed entries={loomEntries} />

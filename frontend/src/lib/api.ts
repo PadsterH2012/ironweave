@@ -632,6 +632,12 @@ export const workflows = {
     create: (workflowId: string, data: CreateInstance) => post<WorkflowInstance>(`/workflows/${workflowId}/instances`, data),
     approveGate: (workflowId: string, instanceId: string, stageId: string) =>
       post(`/workflows/${workflowId}/instances/${instanceId}/stages/${stageId}/approve`, {}),
+    pause: (workflowId: string, instanceId: string) =>
+      post<WorkflowInstance>(`/workflows/${workflowId}/instances/${instanceId}/pause`, {}),
+    resume: (workflowId: string, instanceId: string) =>
+      post<WorkflowInstance>(`/workflows/${workflowId}/instances/${instanceId}/resume`, {}),
+    cancel: (workflowId: string, instanceId: string) =>
+      post<WorkflowInstance>(`/workflows/${workflowId}/instances/${instanceId}/cancel`, {}),
   },
 };
 
@@ -716,9 +722,19 @@ export const runtimes = {
   list: () => get<RuntimeInfo[]>('/runtimes'),
 };
 
+export interface MergeQueueDiff {
+  branch: string;
+  target: string;
+  diff: string;
+  conflict_files: string[];
+}
+
 export const mergeQueue = {
   list: (projectId: string) => get<MergeQueueEntry[]>(`/projects/${projectId}/merge-queue`),
   approve: (projectId: string, id: string) => post<MergeQueueEntry>(`/projects/${projectId}/merge-queue/${id}/approve`, {}),
+  resolve: (projectId: string, id: string) => post<MergeQueueEntry>(`/projects/${projectId}/merge-queue/${id}/resolve`, {}),
+  diff: (projectId: string, id: string) => get<MergeQueueDiff>(`/projects/${projectId}/merge-queue/${id}/diff`),
+  reject: (projectId: string, id: string) => post<MergeQueueEntry>(`/projects/${projectId}/merge-queue/${id}/reject`, {}),
 };
 
 export interface LoomEntry {
@@ -737,6 +753,32 @@ export const loom = {
   recent: (limit = 50) => get<LoomEntry[]>(`/loom?limit=${limit}`),
   byProject: (projectId: string, limit = 50) => get<LoomEntry[]>(`/projects/${projectId}/loom?limit=${limit}`),
   byTeam: (teamId: string, limit = 50) => get<LoomEntry[]>(`/teams/${teamId}/loom?limit=${limit}`),
+};
+
+// ── Swarm status ─────────────────────────────────────────────────
+
+export interface SwarmAgent {
+  session_id: string;
+  role: string;
+  runtime: string;
+  state: string;
+  issue_id: string | null;
+  issue_title: string | null;
+}
+
+export interface SwarmStatus {
+  coordination_mode: string;
+  active_agents: number;
+  idle_agents: number;
+  total_agents: number;
+  task_pool_depth: number;
+  throughput_issues_per_hour: number;
+  scaling_recommendation: string;
+  agents: SwarmAgent[];
+}
+
+export const swarm = {
+  status: (projectId: string) => get<SwarmStatus>(`/projects/${projectId}/swarm-status`),
 };
 
 export const sync = {

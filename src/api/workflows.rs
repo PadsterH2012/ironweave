@@ -76,3 +76,48 @@ pub async fn approve_gate(
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(StatusCode::OK)
 }
+
+pub async fn pause_instance(
+    State(state): State<AppState>,
+    Path((_wid, instance_id)): Path<(String, String)>,
+) -> Result<Json<WorkflowInstance>, StatusCode> {
+    let conn = state.db.lock().unwrap();
+    let instance = WorkflowInstance::get_by_id(&conn, &instance_id)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    if instance.state != "running" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    WorkflowInstance::update_state(&conn, &instance_id, "paused")
+        .map(Json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+pub async fn resume_instance(
+    State(state): State<AppState>,
+    Path((_wid, instance_id)): Path<(String, String)>,
+) -> Result<Json<WorkflowInstance>, StatusCode> {
+    let conn = state.db.lock().unwrap();
+    let instance = WorkflowInstance::get_by_id(&conn, &instance_id)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    if instance.state != "paused" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    WorkflowInstance::update_state(&conn, &instance_id, "running")
+        .map(Json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+pub async fn cancel_instance(
+    State(state): State<AppState>,
+    Path((_wid, instance_id)): Path<(String, String)>,
+) -> Result<Json<WorkflowInstance>, StatusCode> {
+    let conn = state.db.lock().unwrap();
+    let instance = WorkflowInstance::get_by_id(&conn, &instance_id)
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    if instance.state == "completed" || instance.state == "cancelled" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    WorkflowInstance::update_state(&conn, &instance_id, "cancelled")
+        .map(Json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
