@@ -14,3 +14,4 @@ pub mod project_apps;
 pub mod plan_import;
 pub mod merge_queue;
 pub mod runtimes;
+pub mod loom;
