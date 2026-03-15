@@ -6,6 +6,7 @@
     teams,
     workflows,
     mounts,
+    loom,
     type AppStatus,
     type Project,
     type Team,
@@ -1048,6 +1049,8 @@
       </div>
     {:else if activeTab === 'merge-queue'}
       <MergeQueue projectId={params.id} />
+    {:else if activeTab === 'loom'}
+      <LoomFeed fetchFn={() => loom.byProject(params.id)} />
     {:else if activeTab === 'files'}
       <ProjectFiles projectId={params.id} />
     {:else if activeTab === 'history'}

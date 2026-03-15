@@ -569,6 +569,18 @@ impl OrchestratorRunner {
             tracing::error!("Parent auto-close sweep error: {}", e);
         }
 
+        // Dead session reaper — mark stale/orphaned sessions as dead, unclaim their issues
+        {
+            let conn = self.db.lock().unwrap();
+            match AgentSession::reap_dead_sessions(&conn, 1800) {
+                Ok(reaped) if !reaped.is_empty() => {
+                    tracing::info!("Reaped {} dead sessions: {:?}", reaped.len(), reaped);
+                }
+                Err(e) => tracing::error!("Dead session reaper error: {}", e),
+                _ => {}
+            }
+        }
+
         // Merge queue processing
         if let Err(e) = self.sweep_merge_queue().await {
             tracing::error!("Merge queue sweep error: {}", e);

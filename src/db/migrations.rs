@@ -76,7 +76,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             worktree_path TEXT,
             branch TEXT,
             state TEXT NOT NULL DEFAULT 'idle'
-                CHECK(state IN ('idle', 'working', 'blocked', 'crashed')),
+                CHECK(state IN ('idle', 'working', 'blocked', 'crashed', 'dead')),
             claimed_task_id TEXT,
             tokens_used INTEGER NOT NULL DEFAULT 0,
             cost REAL NOT NULL DEFAULT 0.0,
@@ -583,6 +583,51 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     // ── Phase 4.4: Cross-Project Learning ──────────────────────────────
     migrate_alter(conn,"ALTER TABLE projects ADD COLUMN share_learning INTEGER NOT NULL DEFAULT 0");
+
+    // ── Dead session state ───────────────────────────────────────────
+    // Add 'dead' to agent_sessions state CHECK constraint.  Only runs once:
+    // we check whether the existing CHECK already includes 'dead'.
+    let needs_dead_migration: bool = {
+        let mut stmt = conn.prepare(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_sessions'"
+        )?;
+        let sql: String = stmt.query_row([], |row| row.get(0))?;
+        !sql.contains("dead")
+    };
+    if needs_dead_migration {
+        // Disable FK enforcement during table swap (other tables reference agent_sessions)
+        conn.execute_batch("PRAGMA foreign_keys=OFF;")?;
+        conn.execute_batch("
+            DROP TABLE IF EXISTS agent_sessions_new;
+            CREATE TABLE agent_sessions_new (
+                id TEXT PRIMARY KEY,
+                team_id TEXT NOT NULL REFERENCES teams(id),
+                slot_id TEXT NOT NULL REFERENCES team_agent_slots(id),
+                workflow_instance_id TEXT,
+                runtime TEXT NOT NULL,
+                pid INTEGER,
+                worktree_path TEXT,
+                branch TEXT,
+                state TEXT NOT NULL DEFAULT 'idle'
+                    CHECK(state IN ('idle', 'working', 'blocked', 'crashed', 'dead')),
+                claimed_task_id TEXT,
+                tokens_used INTEGER NOT NULL DEFAULT 0,
+                cost REAL NOT NULL DEFAULT 0.0,
+                started_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_heartbeat TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            INSERT INTO agent_sessions_new
+                SELECT id, team_id, slot_id, workflow_instance_id, runtime, pid,
+                       worktree_path, branch, state, claimed_task_id, tokens_used,
+                       cost, started_at, last_heartbeat
+                FROM agent_sessions;
+            DROP TABLE agent_sessions;
+            ALTER TABLE agent_sessions_new RENAME TO agent_sessions;
+            CREATE INDEX IF NOT EXISTS idx_agent_sessions_team ON agent_sessions(team_id);
+            CREATE INDEX IF NOT EXISTS idx_agent_sessions_state ON agent_sessions(state);
+        ")?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+    }
 
     Ok(())
 }

@@ -1469,3 +1469,168 @@ fn dag_crash_recovery_resumes_from_checkpoint() {
     restored_exec.update_stage("step3", StageStatus::Completed);
     assert!(restored_exec.is_complete());
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. Dead session reaper & purge API
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Force a session's last_heartbeat to the given SQLite datetime expression
+/// (e.g. `"datetime('now', '-31 minutes')`).
+fn backdate_heartbeat(conn: &Connection, session_id: &str, expr: &str) {
+    conn.execute(
+        &format!(
+            "UPDATE agent_sessions SET last_heartbeat = {} WHERE id = ?1",
+            expr
+        ),
+        rusqlite::params![session_id],
+    )
+    .unwrap();
+}
+
+#[test]
+fn mark_dead_on_stale_heartbeat() {
+    let conn = setup_db();
+    let project = make_project(&conn);
+
+    // Create an issue and an agent that has claimed it
+    let issue = make_issue(&conn, &project.id, "stale-heartbeat task");
+    let agent = make_agent_session(&conn, &project);
+
+    // Claim the issue
+    Issue::claim(&conn, &issue.id, &agent.id).unwrap();
+
+    // Backdate the heartbeat to 31 minutes ago (>30 min stale threshold)
+    backdate_heartbeat(&conn, &agent.id, "datetime('now', '-31 minutes')");
+
+    // Run one reaper sweep (threshold = 1800 seconds = 30 minutes)
+    let reaped = AgentSession::reap_dead_sessions(&conn, 1800).unwrap();
+
+    // The session should have been reaped
+    assert!(reaped.contains(&agent.id), "expected session in reaped list");
+
+    // Session state should now be 'dead'
+    let refreshed = AgentSession::get_by_id(&conn, &agent.id).unwrap();
+    assert_eq!(refreshed.state, "dead");
+
+    // The previously claimed issue should be back to open / unclaimed
+    let refreshed_issue = Issue::get_by_id(&conn, &issue.id).unwrap();
+    assert_eq!(refreshed_issue.status, "open");
+    assert!(refreshed_issue.claimed_by.is_none());
+    assert!(refreshed_issue.claimed_at.is_none());
+}
+
+#[test]
+fn mark_dead_on_missing_pid() {
+    let conn = setup_db();
+    let project = make_project(&conn);
+
+    // Insert a session with a PID that definitely does not exist
+    let team = make_team(&conn, &project);
+    let slot = TeamAgentSlot::create(
+        &conn,
+        &CreateTeamAgentSlot {
+            team_id: team.id.clone(),
+            role: "coder".to_string(),
+            runtime: "claude".to_string(),
+            model: None,
+            config: None,
+            slot_order: None,
+            is_lead: None,
+        },
+    )
+    .unwrap();
+    let session = AgentSession::create(
+        &conn,
+        &CreateAgentSession {
+            team_id: team.id.clone(),
+            slot_id: slot.id.clone(),
+            runtime: "claude".to_string(),
+            workflow_instance_id: None,
+            pid: Some(9_999_999), // astronomically high PID — won't exist
+            worktree_path: None,
+            branch: None,
+        },
+    )
+    .unwrap();
+
+    // Run reaper with a very long stale threshold so heartbeat isn't triggered
+    let reaped = AgentSession::reap_dead_sessions(&conn, 86400).unwrap();
+
+    assert!(reaped.contains(&session.id), "expected session reaped due to missing PID");
+    let refreshed = AgentSession::get_by_id(&conn, &session.id).unwrap();
+    assert_eq!(refreshed.state, "dead");
+}
+
+#[test]
+fn live_session_not_marked_dead() {
+    let conn = setup_db();
+    let project = make_project(&conn);
+    let agent = make_agent_session(&conn, &project);
+
+    // Update the session with the current process's real PID so it's definitely alive
+    let current_pid = std::process::id() as i64;
+    conn.execute(
+        "UPDATE agent_sessions SET pid = ?1 WHERE id = ?2",
+        rusqlite::params![current_pid, agent.id],
+    )
+    .unwrap();
+
+    // Run reaper with a very long stale threshold so heartbeat isn't triggered.
+    // The PID check should find the process alive and leave the session alone.
+    let reaped = AgentSession::reap_dead_sessions(&conn, 86400).unwrap();
+
+    assert!(
+        !reaped.contains(&agent.id),
+        "live session should not be reaped"
+    );
+
+    let refreshed = AgentSession::get_by_id(&conn, &agent.id).unwrap();
+    assert_eq!(refreshed.state, "idle", "live session state should be unchanged");
+}
+
+#[test]
+fn delete_dead_sessions_endpoint() {
+    let conn = setup_db();
+    let project = make_project(&conn);
+
+    // Create two sessions
+    let dead_agent = make_agent_session(&conn, &project);
+    let idle_agent = make_agent_session(&conn, &project);
+
+    // Manually set one to 'dead'
+    conn.execute(
+        "UPDATE agent_sessions SET state = 'dead' WHERE id = ?1",
+        rusqlite::params![dead_agent.id],
+    )
+    .unwrap();
+
+    // Invoke the same logic as DELETE /api/agents/dead
+    let deleted = AgentSession::delete_dead_sessions(&conn).unwrap();
+
+    // Exactly one session should have been deleted
+    assert_eq!(deleted, 1, "expected 1 dead session deleted");
+
+    // Dead session should be gone from DB
+    assert!(
+        AgentSession::get_by_id(&conn, &dead_agent.id).is_err(),
+        "dead session should no longer exist"
+    );
+
+    // Idle session should still exist
+    let alive = AgentSession::get_by_id(&conn, &idle_agent.id).unwrap();
+    assert_eq!(alive.state, "idle", "idle session should still be present");
+}
+
+#[test]
+fn delete_dead_sessions_empty() {
+    let conn = setup_db();
+    // No dead sessions — just an idle one
+    let project = make_project(&conn);
+    let _agent = make_agent_session(&conn, &project);
+
+    // Invoke the same logic as DELETE /api/agents/dead
+    let deleted = AgentSession::delete_dead_sessions(&conn).unwrap();
+
+    // Should report 0 deleted with no error
+    assert_eq!(deleted, 0, "expected 0 deletions when no dead sessions exist");
+}

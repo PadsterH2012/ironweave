@@ -115,6 +115,106 @@ impl AgentSession {
         }
         Ok(())
     }
+
+    /// One reaper sweep: marks sessions as `dead` if:
+    ///   1. `last_heartbeat` is older than `stale_secs` seconds, or
+    ///   2. The session has a non-null PID that no longer exists on the OS.
+    ///
+    /// For each newly-dead session that had a claimed issue, the issue is
+    /// returned to `open` / unclaimed.
+    ///
+    /// Returns the IDs of sessions that were marked dead during this sweep.
+    pub fn reap_dead_sessions(conn: &Connection, stale_secs: u64) -> Result<Vec<String>> {
+        let mut marked_dead: Vec<String> = Vec::new();
+
+        // --- 1. Stale heartbeat ---
+        let stale_ids: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM agent_sessions \
+                 WHERE state NOT IN ('dead', 'crashed') \
+                   AND last_heartbeat < datetime('now', ?1)",
+            )?;
+            let offset = format!("-{} seconds", stale_secs);
+            stmt.query_map(params![offset], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        for id in stale_ids {
+            conn.execute(
+                "UPDATE agent_sessions SET state = 'dead' WHERE id = ?1",
+                params![id],
+            )?;
+            // Unclaim any issue this session held
+            conn.execute(
+                "UPDATE issues SET status = 'open', claimed_by = NULL, claimed_at = NULL \
+                 WHERE claimed_by = ?1",
+                params![id],
+            )?;
+            marked_dead.push(id);
+        }
+
+        // --- 2. Missing PID ---
+        let pid_sessions: Vec<(String, i64)> = {
+            let mut stmt = conn.prepare(
+                "SELECT id, pid FROM agent_sessions \
+                 WHERE state NOT IN ('dead', 'crashed') AND pid IS NOT NULL",
+            )?;
+            stmt.query_map(params![], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        for (id, pid) in pid_sessions {
+            // Skip sessions already marked dead in step 1
+            if marked_dead.contains(&id) {
+                continue;
+            }
+            if !pid_is_alive(pid) {
+                conn.execute(
+                    "UPDATE agent_sessions SET state = 'dead' WHERE id = ?1",
+                    params![id],
+                )?;
+                conn.execute(
+                    "UPDATE issues SET status = 'open', claimed_by = NULL, claimed_at = NULL \
+                     WHERE claimed_by = ?1",
+                    params![id],
+                )?;
+                marked_dead.push(id);
+            }
+        }
+
+        Ok(marked_dead)
+    }
+
+    /// Delete all sessions with `state = 'dead'`.  Returns the number deleted.
+    pub fn delete_dead_sessions(conn: &Connection) -> Result<usize> {
+        let n = conn.execute(
+            "DELETE FROM agent_sessions WHERE state = 'dead'",
+            [],
+        )?;
+        Ok(n)
+    }
+}
+
+/// Returns `true` if a process with the given PID is currently alive.
+fn pid_is_alive(pid: i64) -> bool {
+    // Use /proc on Linux; this is the lowest-overhead check and avoids
+    // pulling in nix/libc just for a signal(0) call.
+    #[cfg(target_os = "linux")]
+    {
+        std::path::Path::new(&format!("/proc/{}", pid)).exists()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // Portable fallback: attempt to send signal 0 via kill(2) via sysinfo.
+        use sysinfo::{System, RefreshKind, ProcessRefreshKind};
+        let mut sys = System::new_with_specifics(
+            RefreshKind::new().with_processes(ProcessRefreshKind::new()),
+        );
+        sys.refresh_processes(ProcessRefreshKind::new());
+        sys.process(sysinfo::Pid::from(pid as usize)).is_some()
+    }
 }
 
 #[cfg(test)]
