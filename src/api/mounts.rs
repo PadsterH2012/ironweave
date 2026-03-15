@@ -45,17 +45,17 @@ impl From<Mount> for MountResponse {
     }
 }
 
-pub async fn list(State(state): State<AppState>) -> Json<Vec<MountResponse>> {
-    let conn = state.db.lock().unwrap();
+pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<MountResponse>>, StatusCode> {
+    let conn = state.conn()?;
     let mounts = Mount::list(&conn).unwrap_or_default();
-    Json(mounts.into_iter().map(MountResponse::from).collect())
+    Ok(Json(mounts.into_iter().map(MountResponse::from).collect()))
 }
 
 pub async fn create(
     State(state): State<AppState>,
     Json(input): Json<CreateMount>,
 ) -> Result<(StatusCode, Json<MountResponse>), StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Mount::create(&conn, &input)
         .map(|m| (StatusCode::CREATED, Json(MountResponse::from(m))))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -65,7 +65,7 @@ pub async fn get(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<MountResponse>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Mount::get_by_id(&conn, &id)
         .map(|m| Json(MountResponse::from(m)))
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -75,7 +75,7 @@ pub async fn delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Mount::delete(&conn, &id)
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -86,13 +86,13 @@ pub async fn mount_action(
     Path(id): Path<String>,
 ) -> Result<Json<MountResponse>, StatusCode> {
     {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         Mount::get_by_id(&conn, &id).map_err(|_| StatusCode::NOT_FOUND)?;
     }
     if let Some(ref mm) = state.mount_manager {
         mm.mount(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Mount::get_by_id(&conn, &id)
         .map(|m| Json(MountResponse::from(m)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -103,13 +103,13 @@ pub async fn unmount_action(
     Path(id): Path<String>,
 ) -> Result<Json<MountResponse>, StatusCode> {
     {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         Mount::get_by_id(&conn, &id).map_err(|_| StatusCode::NOT_FOUND)?;
     }
     if let Some(ref mm) = state.mount_manager {
         mm.unmount(&id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Mount::get_by_id(&conn, &id)
         .map(|m| Json(MountResponse::from(m)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -132,7 +132,7 @@ pub async fn update(
     Path(id): Path<String>,
     Json(input): Json<CreateMount>,
 ) -> Result<Json<MountResponse>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
 
     // Check if remote_path changed — if so, wipe jj history for linked projects
     let old = Mount::get_by_id(&conn, &id).map_err(|_| StatusCode::NOT_FOUND)?;
@@ -167,7 +167,7 @@ pub async fn duplicate(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<(StatusCode, Json<MountResponse>), StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     let existing = Mount::get_by_id(&conn, &id).map_err(|_| StatusCode::NOT_FOUND)?;
     let input = CreateMount {
         name: format!("{} (copy)", existing.name),
@@ -258,7 +258,7 @@ fn build_ssh_args(
 
 fn get_proxy_hops(state: &AppState, proxy_config_id: Option<&str>) -> Option<Vec<crate::models::proxy_config::ProxyHop>> {
     proxy_config_id.and_then(|pid| {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn().ok()?;
         crate::models::proxy_config::ProxyConfig::get_by_id(&conn, pid)
             .ok()
             .map(|pc| pc.hops)

@@ -26,11 +26,17 @@
   import ProjectFiles from '../lib/components/ProjectFiles.svelte';
   import ProjectHistory from '../lib/components/ProjectHistory.svelte';
   import ProjectSettings from '../lib/components/ProjectSettings.svelte';
+  import PromptEditor from '../lib/components/PromptEditor.svelte';
   import MergeQueue from '../lib/components/MergeQueue.svelte';
   import DagGraph from '../lib/components/DagGraph.svelte';
   import WorkflowRunner from '../lib/components/WorkflowRunner.svelte';
   import SwarmStatus from '../lib/components/SwarmStatus.svelte';
   import LoomFeed from '../lib/components/LoomFeed.svelte';
+  import QualitySlider from '../lib/components/QualitySlider.svelte';
+  import CostDashboard from '../lib/components/CostDashboard.svelte';
+  import CoordinatorPanel from '../lib/components/CoordinatorPanel.svelte';
+  import RoutingSuggestions from '../lib/components/RoutingSuggestions.svelte';
+  import TeamRoleOverrides from '../lib/components/TeamRoleOverrides.svelte';
   import { loom, type LoomEntry } from '../lib/api';
 
   interface Props {
@@ -96,6 +102,11 @@
     { key: 'loom', label: 'Loom' },
     { key: 'files', label: 'Files' },
     ...(project?.mount_id ? [{ key: 'history', label: 'History' }] : []),
+    { key: 'prompts', label: 'Prompts' },
+    { key: 'quality', label: 'Quality' },
+    { key: 'costs', label: 'Costs' },
+    { key: 'coordinator', label: 'Coordinator' },
+    { key: 'routing', label: 'Routing' },
     { key: 'settings', label: 'Settings' },
   ]);
 
@@ -1027,6 +1038,25 @@
       <ProjectFiles projectId={params.id} />
     {:else if activeTab === 'history'}
       <ProjectHistory projectId={params.id} />
+    {:else if activeTab === 'prompts'}
+      <PromptEditor projectId={params.id} />
+    {:else if activeTab === 'quality'}
+      <div class="space-y-4">
+        <QualitySlider projectId={params.id} />
+        {#each teamList as team}
+          <div>
+            <div class="text-xs text-gray-500 mb-2">Team: {team.name}</div>
+            <QualitySlider projectId={params.id} teamId={team.id} />
+          </div>
+          <TeamRoleOverrides teamId={team.id} />
+        {/each}
+      </div>
+    {:else if activeTab === 'costs'}
+      <CostDashboard projectId={params.id} />
+    {:else if activeTab === 'coordinator'}
+      <CoordinatorPanel projectId={params.id} />
+    {:else if activeTab === 'routing'}
+      <RoutingSuggestions projectId={params.id} />
     {:else if activeTab === 'settings'}
       <ProjectSettings {project} onUpdate={fetchProject} />
     {/if}

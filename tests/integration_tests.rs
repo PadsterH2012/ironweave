@@ -100,6 +100,7 @@ fn make_agent_session(conn: &Connection, project: &Project) -> AgentSession {
             pid: None,
             worktree_path: None,
             branch: None,
+            model: None,
         },
     )
     .unwrap()

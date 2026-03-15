@@ -38,7 +38,7 @@ pub async fn import_plan(
 
     // Get project directory
     let project_dir = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn().map_err(|s| (s, "database unavailable".into()))?;
         let project = Project::get_by_id(&conn, &project_id)
             .map_err(|_| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
         project.directory
@@ -66,7 +66,7 @@ pub async fn import_plan(
     let mut task_to_uuid: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
     let mut imported_issues = Vec::new();
 
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn().map_err(|s| (s, "database unavailable".into()))?;
     conn.execute_batch("BEGIN").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Transaction start failed: {}", e)))?;
 
     for task in &parsed {

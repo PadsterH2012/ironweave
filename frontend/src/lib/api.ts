@@ -170,14 +170,19 @@ export const RUNTIME_MODELS: Record<string, string[]> = {
 export const PREDEFINED_ROLES: string[] = [
   'Architect',
   'Senior Coder',
+  'Code Reviewer',
   'DB Senior Engineer',
   'UI/UX Senior Coder',
+  'Senior UX/UI Designer',
+  'Brand Designer',
   'Senior Tester',
   'Security Engineer',
   'DevOps Engineer',
   'Infrastructure Engineer',
   'Researcher',
   'Documentor',
+  'Marketing Manager',
+  'News Letter Writer',
   'Office Monkey',
 ];
 
@@ -588,7 +593,7 @@ export const issues = {
   get: (projectId: string, id: string) => get<Issue>(`/projects/${projectId}/issues/${id}`),
   create: (projectId: string, data: CreateIssue) => post<Issue>(`/projects/${projectId}/issues`, data),
   update: (projectId: string, id: string, data: UpdateIssue) => patch<Issue>(`/projects/${projectId}/issues/${id}`, data),
-  claim: (projectId: string, id: string, agentId: string) => post<void>(`/projects/${projectId}/issues/${id}/claim`, { agent_id: agentId }),
+  claim: (projectId: string, id: string, agentId: string) => post<void>(`/projects/${projectId}/issues/${id}/claim`, { agent_session_id: agentId }),
   unclaim: (projectId: string, id: string) => post<void>(`/projects/${projectId}/issues/${id}/unclaim`, {}),
   ready: (projectId: string) => get<Issue[]>(`/projects/${projectId}/issues/ready`),
   delete: (projectId: string, id: string) => del(`/projects/${projectId}/issues/${id}`),
@@ -783,6 +788,48 @@ export const swarm = {
   status: (projectId: string) => get<SwarmStatus>(`/projects/${projectId}/swarm-status`),
 };
 
+// ── Prompt Templates ─────────────────────────────────────────────
+
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  template_type: 'role' | 'skill';
+  content: string;
+  project_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PromptTemplateAssignment {
+  id: string;
+  role: string;
+  template_id: string;
+  priority: number;
+  created_at: string;
+  template_name?: string;
+  template_type?: string;
+}
+
+export const promptTemplates = {
+  list: (projectId?: string) =>
+    get<PromptTemplate[]>(`/prompt-templates${projectId ? `?project_id=${projectId}` : ''}`),
+  get: (id: string) => get<PromptTemplate>(`/prompt-templates/${id}`),
+  create: (data: { name: string; template_type?: string; content: string; project_id?: string }) =>
+    post<PromptTemplate>('/prompt-templates', data),
+  update: (id: string, data: { name?: string; content?: string }) =>
+    put<PromptTemplate>(`/prompt-templates/${id}`, data),
+  delete: (id: string) => del(`/prompt-templates/${id}`),
+  // Assignments
+  listAssignments: (role: string) =>
+    get<PromptTemplateAssignment[]>(`/prompt-templates/roles/${encodeURIComponent(role)}/assignments`),
+  createAssignment: (data: { role: string; template_id: string; priority?: number }) =>
+    post<PromptTemplateAssignment>('/prompt-templates/assignments', data),
+  deleteAssignment: (id: string) => del(`/prompt-templates/assignments/${id}`),
+  // Build full prompt for a role
+  buildPrompt: (role: string, projectId?: string) =>
+    get<{ role: string; prompt: string }>(`/prompt-templates/roles/${encodeURIComponent(role)}/build${projectId ? `?project_id=${projectId}` : ''}`),
+};
+
 export const sync = {
   trigger: (projectId: string) => post<SyncStatus>(`/projects/${projectId}/sync`, {}),
   status: (projectId: string) => get<SyncStatus>(`/projects/${projectId}/sync/status`),
@@ -795,4 +842,171 @@ export const sync = {
     get<string>(`/projects/${projectId}/files/content?path=${encodeURIComponent(path)}`),
 };
 
+// ── v2: Quality Tiers ─────────────────────────────────────────────
 
+export interface QualityTier {
+  tier: number;
+  label: string;
+  example_models: string;
+  cost_range: string;
+  max_context_tokens: number;
+  max_output_tokens: number;
+}
+
+export interface TierRange {
+  tier_floor: number;
+  tier_ceiling: number;
+}
+
+export const qualityTiers = {
+  list: () => get<QualityTier[]>('/quality-tiers'),
+  getProject: (projectId: string) => get<TierRange>(`/projects/${projectId}/quality`),
+  setProject: (projectId: string, data: { tier_floor?: number; tier_ceiling?: number }) =>
+    put<TierRange>(`/projects/${projectId}/quality`, data),
+  resetProject: (projectId: string) => post<TierRange>(`/projects/${projectId}/quality/reset`, {}),
+  getTeam: (teamId: string) => get<TierRange>(`/teams/${teamId}/quality`),
+  setTeam: (teamId: string, data: { tier_floor?: number; tier_ceiling?: number }) =>
+    put<TierRange>(`/teams/${teamId}/quality`, data),
+};
+
+// ── v2: Cost Tracking ─────────────────────────────────────────────
+
+export interface CostSummary {
+  total_tokens: number;
+  total_cost_usd: number;
+  task_count: number;
+  failure_count: number;
+  by_role: Record<string, number>;
+  by_model: Record<string, number>;
+}
+
+export interface DailySpend {
+  date: string;
+  cost_usd: number;
+  tokens: number;
+}
+
+export const costTracking = {
+  summary: (projectId: string, days?: number) =>
+    get<CostSummary>(`/projects/${projectId}/costs/summary${days ? `?days=${days}` : ''}`),
+  daily: (projectId: string, days?: number) =>
+    get<DailySpend[]>(`/projects/${projectId}/costs/daily${days ? `?days=${days}` : ''}`),
+  aggregate: (projectId: string) => post<void>(`/projects/${projectId}/costs/aggregate`, {}),
+};
+
+// ── v2: Coordinator ───────────────────────────────────────────────
+
+export interface CoordinatorMemory {
+  id: string;
+  project_id: string;
+  state: string;
+  session_id: string | null;
+  last_active_at: string | null;
+  created_at: string;
+}
+
+export const coordinator = {
+  get: (projectId: string) => get<CoordinatorMemory>(`/projects/${projectId}/coordinator`),
+  wake: (projectId: string, sessionId: string) =>
+    post<CoordinatorMemory>(`/projects/${projectId}/coordinator/wake`, { session_id: sessionId }),
+  sleep: (projectId: string) =>
+    post<CoordinatorMemory>(`/projects/${projectId}/coordinator/sleep`, {}),
+  list: () => get<CoordinatorMemory[]>('/coordinators'),
+};
+
+// ── v2: Routing Overrides ─────────────────────────────────────────
+
+export interface RoutingOverride {
+  id: string;
+  project_id: string;
+  role: string;
+  task_type: string;
+  from_model: string | null;
+  to_model: string;
+  to_tier: number;
+  reason: string;
+  confidence: number;
+  status: string;
+  evidence: string;
+  observations: number;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export const routingOverrides = {
+  list: (projectId: string) => get<RoutingOverride[]>(`/projects/${projectId}/routing-overrides`),
+  detect: (projectId: string) => post<RoutingOverride[]>(`/projects/${projectId}/routing-overrides/detect`, {}),
+  accept: (id: string) => post<RoutingOverride>(`/routing-overrides/${id}/accept`, {}),
+  reject: (id: string) => post<RoutingOverride>(`/routing-overrides/${id}/reject`, {}),
+};
+
+// ── v2: Team Role Overrides ───────────────────────────────────────
+
+export interface TeamRoleOverride {
+  id: string;
+  team_id: string;
+  role: string;
+  runtime: string | null;
+  provider: string | null;
+  model: string | null;
+  is_user_set: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const teamRoleOverrides = {
+  list: (teamId: string) => get<TeamRoleOverride[]>(`/teams/${teamId}/role-overrides`),
+  set: (teamId: string, data: { role: string; runtime?: string; provider?: string; model?: string }) =>
+    post<TeamRoleOverride>(`/teams/${teamId}/role-overrides`, data),
+  clear: (teamId: string, role: string) => del(`/teams/${teamId}/role-overrides/${encodeURIComponent(role)}`),
+};
+
+// ── v2: Performance Log ───────────────────────────────────────────
+
+export interface PerformanceLogEntry {
+  id: string;
+  project_id: string;
+  role: string;
+  runtime: string;
+  provider: string;
+  model: string;
+  tier: number;
+  task_type: string;
+  task_complexity: number;
+  outcome: string;
+  failure_reason: string | null;
+  tokens_used: number;
+  cost_usd: number;
+  duration_seconds: number;
+  retries: number;
+  escalated_from: string | null;
+  complexity_score: number | null;
+  files_touched: string | null;
+  created_at: string;
+}
+
+export interface ModelStats {
+  model: string;
+  role: string;
+  total: number;
+  successes: number;
+  failures: number;
+  success_rate: number;
+  avg_cost: number;
+  avg_duration: number;
+}
+
+export const performanceLog = {
+  list: (projectId: string, params?: { role?: string; model?: string; outcome?: string; days?: number; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.role) q.set('role', params.role);
+    if (params?.model) q.set('model', params.model);
+    if (params?.outcome) q.set('outcome', params.outcome);
+    if (params?.days) q.set('days', String(params.days));
+    if (params?.limit) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return get<PerformanceLogEntry[]>(`/projects/${projectId}/performance${qs ? `?${qs}` : ''}`);
+  },
+  stats: (projectId: string, days?: number) =>
+    get<ModelStats[]>(`/projects/${projectId}/performance/stats${days ? `?days=${days}` : ''}`),
+};

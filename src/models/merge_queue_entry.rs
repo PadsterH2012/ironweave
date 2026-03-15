@@ -88,6 +88,8 @@ impl MergeQueueEntry {
         })
     }
 
+    const VALID_STATUSES: &'static [&'static str] = &["pending", "merging", "merged", "conflict", "failed"];
+
     pub fn update_status(
         conn: &Connection,
         id: &str,
@@ -96,6 +98,12 @@ impl MergeQueueEntry {
         resolver_agent_id: Option<&str>,
         error_message: Option<&str>,
     ) -> Result<Self> {
+        if !Self::VALID_STATUSES.contains(&status) {
+            return Err(IronweaveError::Validation(format!(
+                "Invalid merge queue status '{}'. Must be one of: {}",
+                status, Self::VALID_STATUSES.join(", ")
+            )));
+        }
         let changes = conn.execute(
             "UPDATE merge_queue SET status = ?1, conflict_files = COALESCE(?2, conflict_files), resolver_agent_id = COALESCE(?3, resolver_agent_id), error_message = ?4, updated_at = datetime('now') WHERE id = ?5",
             params![status, conflict_files, resolver_agent_id, error_message, id],

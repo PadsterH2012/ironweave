@@ -15,17 +15,17 @@ pub struct MergeQueueDiff {
 pub async fn list_queue(
     State(state): State<AppState>,
     Path(pid): Path<String>,
-) -> Json<Vec<MergeQueueEntry>> {
-    let conn = state.db.lock().unwrap();
+) -> Result<Json<Vec<MergeQueueEntry>>, StatusCode> {
+    let conn = state.conn()?;
     let entries = MergeQueueEntry::list_by_project(&conn, &pid).unwrap_or_default();
-    Json(entries)
+    Ok(Json(entries))
 }
 
 pub async fn approve_merge(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<Json<MergeQueueEntry>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     MergeQueueEntry::update_status(&conn, &id, "pending", None, None, None)
         .map(Json)
         .map_err(|e| match e {
@@ -41,7 +41,7 @@ pub async fn resolve(
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<Json<MergeQueueEntry>, StatusCode> {
     let entry = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         MergeQueueEntry::get_by_id(&conn, &id)
             .map_err(|e| match e {
                 crate::error::IronweaveError::NotFound(_) => StatusCode::NOT_FOUND,
@@ -58,7 +58,7 @@ pub async fn resolve(
 
     // Set status to resolving — the orchestrator sweep will pick up
     // entries in "resolving" state without a resolver_agent_id and spawn an agent
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     MergeQueueEntry::update_status(&conn, &id, "resolving", None, None, None)
         .map(Json)
         .map_err(|e| match e {
@@ -73,7 +73,7 @@ pub async fn get_diff(
     Path((pid, id)): Path<(String, String)>,
 ) -> Result<Json<MergeQueueDiff>, StatusCode> {
     let (entry, project) = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         let entry = MergeQueueEntry::get_by_id(&conn, &id)
             .map_err(|e| match e {
                 crate::error::IronweaveError::NotFound(_) => StatusCode::NOT_FOUND,
@@ -111,7 +111,7 @@ pub async fn reject(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<Json<MergeQueueEntry>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     MergeQueueEntry::update_status(&conn, &id, "rejected", None, None, Some("Rejected by human reviewer"))
         .map(Json)
         .map_err(|e| match e {

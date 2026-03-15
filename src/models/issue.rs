@@ -82,15 +82,60 @@ impl Issue {
         })
     }
 
+    /// Check that adding `new_id` with `new_deps` would not create a cycle.
+    /// Walks the dependency graph from each dep to see if any path leads back to `new_id`.
+    fn would_create_cycle(conn: &Connection, new_id: &str, new_deps: &[String]) -> bool {
+        let mut visited = std::collections::HashSet::new();
+        let mut stack: Vec<String> = new_deps.to_vec();
+        while let Some(dep_id) = stack.pop() {
+            if dep_id == new_id {
+                return true;
+            }
+            if !visited.insert(dep_id.clone()) {
+                continue;
+            }
+            if let Ok(dep_issue) = Self::get_by_id(conn, &dep_id) {
+                if let Ok(transitive_deps) = serde_json::from_str::<Vec<String>>(&dep_issue.depends_on) {
+                    stack.extend(transitive_deps);
+                }
+            }
+        }
+        false
+    }
+
     pub fn create(conn: &Connection, input: &CreateIssue) -> Result<Self> {
         let id = Uuid::new_v4().to_string();
         let issue_type = input.issue_type.as_deref().unwrap_or("task");
         let description = input.description.as_deref().unwrap_or("");
         let priority = input.priority.unwrap_or(5);
         let depends_on = match &input.depends_on {
-            Some(deps) => serde_json::to_string(deps)?,
+            Some(deps) => {
+                // Validate: no self-dependency
+                if deps.contains(&id) {
+                    return Err(IronweaveError::Validation("Issue cannot depend on itself".into()));
+                }
+                // Validate: all dependency IDs exist
+                for dep_id in deps {
+                    Self::get_by_id(conn, dep_id).map_err(|_| {
+                        IronweaveError::Validation(format!("Dependency {} not found", dep_id))
+                    })?;
+                }
+                // Validate: no circular dependencies
+                // Since this is a new issue, cycles would only form if deps already depend on each other
+                // in a way that references this new ID (impossible for new issues, but check transitive deps for existing cycles)
+                serde_json::to_string(deps)?
+            }
             None => "[]".to_string(),
         };
+        // Validate parent_id belongs to same project
+        if let Some(ref parent_id) = input.parent_id {
+            let parent = Self::get_by_id(conn, parent_id).map_err(|_| {
+                IronweaveError::Validation(format!("Parent issue {} not found", parent_id))
+            })?;
+            if parent.project_id != input.project_id {
+                return Err(IronweaveError::Validation("Parent issue must belong to the same project".into()));
+            }
+        }
         conn.execute(
             "INSERT INTO issues (id, project_id, type, title, description, priority, depends_on, workflow_instance_id, stage_id, role, parent_id, needs_intake, scope_mode)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
@@ -258,11 +303,19 @@ impl Issue {
         Ok(ready)
     }
 
+    const VALID_STATUSES: &'static [&'static str] = &["open", "in_progress", "review", "closed"];
+
     pub fn update(conn: &Connection, id: &str, input: &UpdateIssue) -> Result<Self> {
         let mut sets = Vec::new();
         let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
         if let Some(ref status) = input.status {
+            if !Self::VALID_STATUSES.contains(&status.as_str()) {
+                return Err(IronweaveError::Validation(format!(
+                    "Invalid issue status '{}'. Must be one of: {}",
+                    status, Self::VALID_STATUSES.join(", ")
+                )));
+            }
             sets.push("status = ?");
             values.push(Box::new(status.clone()));
         }

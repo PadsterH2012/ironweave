@@ -73,6 +73,14 @@ async fn main() {
         });
     }
 
+    // Seed global role registry
+    {
+        let conn = db.lock().unwrap();
+        crate::models::role::Role::seed_defaults(&conn).unwrap_or_else(|e| {
+            tracing::warn!("Failed to seed role registry: {}", e);
+        });
+    }
+
     let registry = Arc::new(RuntimeRegistry::new());
     let process_manager = Arc::new(ProcessManager::new(registry.clone()));
 
@@ -218,7 +226,61 @@ async fn main() {
         .route("/api/teams/{tid}/loom", get(api::loom::list_by_team))
         .route("/api/loom", get(api::loom::list_recent).post(api::loom::create))
         // Swarm status
-        .route("/api/projects/{pid}/swarm-status", get(api::swarm::get_status));
+        .route("/api/projects/{pid}/swarm-status", get(api::swarm::get_status))
+        // Prompt templates
+        .route("/api/prompt-templates", get(api::prompt_templates::list_templates).post(api::prompt_templates::create_template))
+        .route("/api/prompt-templates/{id}", get(api::prompt_templates::get_template).put(api::prompt_templates::update_template).delete(api::prompt_templates::delete_template))
+        .route("/api/prompt-templates/assignments", post(api::prompt_templates::create_assignment))
+        .route("/api/prompt-templates/assignments/{id}", delete(api::prompt_templates::delete_assignment))
+        .route("/api/prompt-templates/roles/{role}/assignments", get(api::prompt_templates::list_assignments))
+        .route("/api/prompt-templates/roles/{role}/build", get(api::prompt_templates::build_prompt))
+        // Cost tracking
+        .route("/api/projects/{pid}/costs", get(api::cost_tracking::list_costs))
+        .route("/api/projects/{pid}/costs/summary", get(api::cost_tracking::get_summary))
+        .route("/api/projects/{pid}/costs/daily", get(api::cost_tracking::get_daily_spend))
+        .route("/api/projects/{pid}/costs/aggregate", post(api::cost_tracking::aggregate_now))
+        // Role registry
+        .route("/api/roles", get(api::roles::list_roles).post(api::roles::create_role))
+        .route("/api/roles/{name}", get(api::roles::get_role).put(api::roles::update_role).delete(api::roles::delete_role))
+        // Quality tiers
+        .route("/api/quality-tiers", get(api::quality::list_tiers))
+        .route("/api/projects/{pid}/quality", get(api::quality::get_project_tiers).put(api::quality::set_project_tiers))
+        .route("/api/projects/{pid}/quality/reset", post(api::quality::reset_project_tiers))
+        .route("/api/teams/{tid}/quality", get(api::quality::get_team_tiers).put(api::quality::set_team_tiers))
+        // Performance log
+        .route("/api/projects/{pid}/performance", get(api::performance::list_logs).post(api::performance::create_log))
+        .route("/api/projects/{pid}/performance/stats", get(api::performance::model_stats))
+        // Coordinator
+        .route("/api/coordinators", get(api::coordinator::list_coordinators))
+        .route("/api/projects/{pid}/coordinator", get(api::coordinator::get_coordinator))
+        .route("/api/projects/{pid}/coordinator/wake", post(api::coordinator::wake_coordinator))
+        .route("/api/projects/{pid}/coordinator/sleep", post(api::coordinator::sleep_coordinator))
+        // Routing overrides
+        .route("/api/projects/{pid}/routing-overrides", get(api::routing_overrides::list_overrides).post(api::routing_overrides::create_override))
+        .route("/api/projects/{pid}/routing-overrides/detect", post(api::routing_overrides::detect_patterns))
+        .route("/api/routing-overrides/{id}/accept", post(api::routing_overrides::accept_override))
+        .route("/api/routing-overrides/{id}/reject", post(api::routing_overrides::reject_override))
+        // Team role overrides
+        .route("/api/teams/{tid}/role-overrides", get(api::team_role_overrides::list_overrides).post(api::team_role_overrides::set_override))
+        .route("/api/teams/{tid}/role-overrides/{role}", delete(api::team_role_overrides::clear_override))
+        // Code graph
+        .route("/api/projects/{pid}/graph/nodes", get(api::code_graph::list_nodes).post(api::code_graph::upsert_node))
+        .route("/api/projects/{pid}/graph/edges", post(api::code_graph::upsert_edge))
+        .route("/api/projects/{pid}/graph/complexity", get(api::code_graph::file_complexity))
+        .route("/api/projects/{pid}/graph/complexity/recompute", post(api::code_graph::recompute_complexity))
+        .route("/api/projects/{pid}/graph/blast-radius", get(api::code_graph::blast_radius))
+        .route("/api/projects/{pid}/graph/clear", delete(api::code_graph::clear_graph))
+        // Workflow traces
+        .route("/api/projects/{pid}/traces", get(api::workflow_traces::list_traces).post(api::workflow_traces::start_trace))
+        .route("/api/traces/{id}", get(api::workflow_traces::get_trace))
+        .route("/api/traces/{id}/steps", get(api::workflow_traces::get_trace_steps).post(api::workflow_traces::add_step))
+        .route("/api/traces/{id}/complete", post(api::workflow_traces::complete_trace))
+        .route("/api/projects/{pid}/chokepoints", get(api::workflow_traces::list_chokepoints))
+        .route("/api/projects/{pid}/chokepoints/detect", post(api::workflow_traces::detect_chokepoints))
+        // Cross-project learning
+        .route("/api/cross-project/suggestions", get(api::cross_project::global_suggestions))
+        .route("/api/cross-project/opted-in", get(api::cross_project::list_opted_in))
+        .route("/api/projects/{pid}/share-learning", post(api::cross_project::toggle_sharing));
 
     // Only add auth middleware if auth is configured
     if auth_config.is_some() {

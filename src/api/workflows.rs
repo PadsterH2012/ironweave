@@ -12,7 +12,7 @@ pub async fn create_definition(
     Json(mut input): Json<CreateWorkflowDefinition>,
 ) -> Result<(StatusCode, Json<WorkflowDefinition>), StatusCode> {
     input.project_id = project_id;
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     WorkflowDefinition::create(&conn, &input)
         .map(|d| (StatusCode::CREATED, Json(d)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -21,16 +21,16 @@ pub async fn create_definition(
 pub async fn list_definitions(
     State(state): State<AppState>,
     Path(project_id): Path<String>,
-) -> Json<Vec<WorkflowDefinition>> {
-    let conn = state.db.lock().unwrap();
-    Json(WorkflowDefinition::list_by_project(&conn, &project_id).unwrap_or_default())
+) -> Result<Json<Vec<WorkflowDefinition>>, StatusCode> {
+    let conn = state.conn()?;
+    Ok(Json(WorkflowDefinition::list_by_project(&conn, &project_id).unwrap_or_default()))
 }
 
 pub async fn get_definition(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<Json<WorkflowDefinition>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     WorkflowDefinition::get_by_id(&conn, &id)
         .map(Json)
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -43,7 +43,7 @@ pub async fn create_instance(
 ) -> Result<(StatusCode, Json<WorkflowInstance>), StatusCode> {
     input.definition_id = wid.clone();
     let instance = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         WorkflowInstance::create(&conn, &input)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
@@ -60,16 +60,16 @@ pub async fn create_instance(
 pub async fn list_instances(
     State(state): State<AppState>,
     Path(wid): Path<String>,
-) -> Json<Vec<WorkflowInstance>> {
-    let conn = state.db.lock().unwrap();
-    Json(WorkflowInstance::list_by_definition(&conn, &wid).unwrap_or_default())
+) -> Result<Json<Vec<WorkflowInstance>>, StatusCode> {
+    let conn = state.conn()?;
+    Ok(Json(WorkflowInstance::list_by_definition(&conn, &wid).unwrap_or_default()))
 }
 
 pub async fn approve_gate(
     State(state): State<AppState>,
     Path((_wid, instance_id, stage_id)): Path<(String, String, String)>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn().map_err(|s| (s, "database unavailable".into()))?;
     conn.execute(
         "INSERT OR REPLACE INTO workflow_gate_approvals (instance_id, stage_id, approved_at) VALUES (?1, ?2, datetime('now'))",
         rusqlite::params![instance_id, stage_id],
@@ -81,7 +81,7 @@ pub async fn pause_instance(
     State(state): State<AppState>,
     Path((_wid, instance_id)): Path<(String, String)>,
 ) -> Result<Json<WorkflowInstance>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     let instance = WorkflowInstance::get_by_id(&conn, &instance_id)
         .map_err(|_| StatusCode::NOT_FOUND)?;
     if instance.state != "running" {
@@ -96,7 +96,7 @@ pub async fn resume_instance(
     State(state): State<AppState>,
     Path((_wid, instance_id)): Path<(String, String)>,
 ) -> Result<Json<WorkflowInstance>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     let instance = WorkflowInstance::get_by_id(&conn, &instance_id)
         .map_err(|_| StatusCode::NOT_FOUND)?;
     if instance.state != "paused" {
@@ -111,7 +111,7 @@ pub async fn cancel_instance(
     State(state): State<AppState>,
     Path((_wid, instance_id)): Path<(String, String)>,
 ) -> Result<Json<WorkflowInstance>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     let instance = WorkflowInstance::get_by_id(&conn, &instance_id)
         .map_err(|_| StatusCode::NOT_FOUND)?;
     if instance.state == "completed" || instance.state == "cancelled" {

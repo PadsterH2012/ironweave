@@ -66,7 +66,7 @@ pub async fn upload(
         stored_path: file_path.to_string_lossy().to_string(),
     };
 
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Attachment::create(&conn, &input)
         .map(|a| (StatusCode::CREATED, Json(a)))
         .map_err(|e| {
@@ -79,7 +79,7 @@ pub async fn list(
     State(state): State<AppState>,
     Path((_pid, issue_id)): Path<(String, String)>,
 ) -> Result<Json<Vec<Attachment>>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Attachment::list_by_issue(&conn, &issue_id)
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -90,7 +90,7 @@ pub async fn download(
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let attachment = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         Attachment::get_by_id(&conn, &id).map_err(|_| StatusCode::NOT_FOUND)?
     };
 

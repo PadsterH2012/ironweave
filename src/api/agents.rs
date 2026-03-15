@@ -79,24 +79,47 @@ pub async fn spawn(
     Ok((StatusCode::CREATED, Json(info)))
 }
 
-pub async fn list(State(state): State<AppState>) -> Json<Vec<AgentInfo>> {
+pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<AgentInfo>>, StatusCode> {
     let active = state.process_manager.list_active().await;
-    let conn = state.db.lock().unwrap();
+    if active.is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let conn = state.conn()?;
+
+    // Single query for all agent metadata instead of N+1
+    let placeholders: Vec<String> = (1..=active.len()).map(|i| format!("?{}", i)).collect();
+    let sql = format!(
+        "SELECT a.id, tas.role, i.title, a.last_heartbeat FROM agent_sessions a \
+         JOIN team_agent_slots tas ON a.slot_id = tas.id \
+         LEFT JOIN issues i ON a.claimed_task_id = i.id \
+         WHERE a.id IN ({})",
+        placeholders.join(", ")
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let ids: Vec<String> = active.iter().map(|(id, _)| id.clone()).collect();
+    let params: Vec<&dyn rusqlite::ToSql> = ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+    let mut db_info: std::collections::HashMap<String, (Option<String>, Option<String>, Option<String>)> =
+        std::collections::HashMap::new();
+    let rows = stmt.query_map(params.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1).ok(),
+            row.get::<_, String>(2).ok(),
+            row.get::<_, String>(3).ok(),
+        ))
+    }).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    for row in rows {
+        if let Ok((id, role, issue, hb)) = row {
+            db_info.insert(id, (role, issue, hb));
+        }
+    }
+
     let infos: Vec<AgentInfo> = active
         .into_iter()
         .map(|(id, runtime)| {
-            let (role, claimed_issue, last_heartbeat) = conn.query_row(
-                "SELECT tas.role, i.title, a.last_heartbeat FROM agent_sessions a \
-                 JOIN team_agent_slots tas ON a.slot_id = tas.id \
-                 LEFT JOIN issues i ON a.claimed_task_id = i.id \
-                 WHERE a.id = ?1",
-                rusqlite::params![&id],
-                |row| Ok((
-                    row.get::<_, String>(0).ok(),
-                    row.get::<_, String>(1).ok(),
-                    row.get::<_, String>(2).ok(),
-                )),
-            ).unwrap_or((None, None, None));
+            let (role, claimed_issue, last_heartbeat) = db_info
+                .remove(&id)
+                .unwrap_or((None, None, None));
             AgentInfo {
                 id,
                 runtime,
@@ -107,7 +130,7 @@ pub async fn list(State(state): State<AppState>) -> Json<Vec<AgentInfo>> {
             }
         })
         .collect();
-    Json(infos)
+    Ok(Json(infos))
 }
 
 pub async fn get_agent(
@@ -122,7 +145,7 @@ pub async fn get_agent(
 
     let locked = agent.lock().await;
     let (role, claimed_issue, last_heartbeat) = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         conn.query_row(
             "SELECT tas.role, i.title, a.last_heartbeat FROM agent_sessions a \
              JOIN team_agent_slots tas ON a.slot_id = tas.id \

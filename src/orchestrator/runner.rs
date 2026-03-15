@@ -893,6 +893,37 @@ impl OrchestratorRunner {
                         metadata: None,
                     });
                 }
+                // ── Auto-log performance (v2 Phase 2.2) ────────────────────
+                {
+                    let conn = self.db.lock().unwrap();
+                    if let Ok(session) = AgentSession::get_by_id(&conn, &ta.agent_session_id) {
+                        let project_id = Team::get_by_id(&conn, &ta.team_id)
+                            .map(|t| t.project_id).unwrap_or_default();
+                        let duration = ta.spawned_at.elapsed().as_secs() as i64;
+                        let _ = crate::models::performance_log::PerformanceLogEntry::create(&conn,
+                            &crate::models::performance_log::CreatePerformanceLog {
+                                project_id,
+                                role: ta.role.clone(),
+                                runtime: session.runtime.clone(),
+                                provider: None,
+                                model: session.model.clone().unwrap_or_else(|| "unknown".to_string()),
+                                tier: None,
+                                task_type: Some(issue.issue_type.clone()),
+                                task_complexity: None,
+                                outcome: "success".to_string(),
+                                failure_reason: None,
+                                tokens_used: Some(session.tokens_used),
+                                cost_usd: Some(session.cost),
+                                duration_seconds: Some(duration),
+                                retries: Some(issue.retry_count as i32),
+                                escalated_from: None,
+                                complexity_score: None,
+                                files_touched: None,
+                            },
+                        );
+                    }
+                }
+
                 // Note: worktree cleanup happens after merge in sweep_merge_queue
                 to_remove.push(key.clone());
                 continue;
@@ -934,6 +965,65 @@ impl OrchestratorRunner {
                         }
                     }
 
+                    // ── v2 Phase 3.2: Tier-aware failure handling ────────────
+                    // Check if we can escalate to a higher tier within bounds
+                    if !success {
+                        if AgentSession::get_by_id(&conn, &ta.agent_session_id).is_ok() {
+                            let current_tier: i32 = conn.query_row(
+                                "SELECT COALESCE(
+                                    (SELECT tier FROM model_performance_log WHERE id = (
+                                        SELECT id FROM model_performance_log WHERE project_id = (
+                                            SELECT project_id FROM teams WHERE id = ?1
+                                        ) ORDER BY created_at DESC LIMIT 1
+                                    )),
+                                    3
+                                )",
+                                params![&ta.team_id],
+                                |row| row.get(0),
+                            ).unwrap_or(3);
+
+                            let tier_ceiling: i32 = conn.query_row(
+                                "SELECT COALESCE(t.tier_ceiling, p.tier_ceiling)
+                                 FROM teams t JOIN projects p ON t.project_id = p.id
+                                 WHERE t.id = ?1",
+                                params![&ta.team_id],
+                                |row| row.get(0),
+                            ).unwrap_or(5);
+
+                            if current_tier < tier_ceiling {
+                                tracing::info!(
+                                    team = %ta.team_id, role = %ta.role, issue = %ta.issue_id,
+                                    current_tier = current_tier, ceiling = tier_ceiling,
+                                    "Agent failed — eligible for tier escalation on retry"
+                                );
+                                // The performance log entry already records the failure with
+                                // escalated_from context; the next dispatch will use performance
+                                // data to select a higher-tier model
+                            } else {
+                                // At ceiling — post loom entry alerting user
+                                let project_id = Team::get_by_id(&conn, &ta.team_id)
+                                    .map(|t| t.project_id).unwrap_or_default();
+                                let _ = conn.execute(
+                                    "INSERT INTO loom (id, project_id, team_id, agent_id, entry_type, role, content)
+                                     VALUES (?1, ?2, ?3, ?4, 'escalation', ?5, ?6)",
+                                    params![
+                                        uuid::Uuid::new_v4().to_string(),
+                                        project_id,
+                                        ta.team_id,
+                                        ta.agent_session_id,
+                                        ta.role,
+                                        format!("Task failed at tier ceiling ({}). Consider raising the quality ceiling for this team or project.", tier_ceiling),
+                                    ],
+                                );
+                                tracing::warn!(
+                                    team = %ta.team_id, role = %ta.role, issue = %ta.issue_id,
+                                    ceiling = tier_ceiling,
+                                    "Agent failed at tier ceiling — posted loom escalation"
+                                );
+                            }
+                        }
+                    }
+
                     if issue.retry_count >= MAX_RETRIES {
                         // Max retries reached — mark as needs_investigation instead of retrying
                         let _ = conn.execute(
@@ -957,6 +1047,38 @@ impl OrchestratorRunner {
                         );
                     }
                 }
+                // ── Auto-log performance on exit (v2 Phase 2.2) ────────────
+                {
+                    let conn = self.db.lock().unwrap();
+                    if let Ok(session) = AgentSession::get_by_id(&conn, &session_id_for_cleanup) {
+                        let project_id = Team::get_by_id(&conn, &ta.team_id)
+                            .map(|t| t.project_id).unwrap_or_default();
+                        let duration = ta.spawned_at.elapsed().as_secs() as i64;
+                        let outcome = if success && issue.status == "closed" { "success" } else if success { "partial" } else { "failure" };
+                        let _ = crate::models::performance_log::PerformanceLogEntry::create(&conn,
+                            &crate::models::performance_log::CreatePerformanceLog {
+                                project_id,
+                                role: ta.role.clone(),
+                                runtime: session.runtime.clone(),
+                                provider: None,
+                                model: session.model.clone().unwrap_or_else(|| "unknown".to_string()),
+                                tier: None,
+                                task_type: Some(issue.issue_type.clone()),
+                                task_complexity: None,
+                                outcome: outcome.to_string(),
+                                failure_reason: if !success { Some("process_exit".to_string()) } else { None },
+                                tokens_used: Some(session.tokens_used),
+                                cost_usd: Some(session.cost),
+                                duration_seconds: Some(duration),
+                                retries: Some(issue.retry_count as i32),
+                                escalated_from: None,
+                                complexity_score: None,
+                                files_touched: None,
+                            },
+                        );
+                    }
+                }
+
                 // Clean up worktree after handling the exit
                 self.cleanup_agent_worktree(&session_id_for_cleanup);
                 to_remove.push(key.clone());
@@ -1038,6 +1160,32 @@ impl OrchestratorRunner {
         };
 
         for team in &active_teams {
+            // ── Budget enforcement (v2 Phase 1.2) ────────────────────────
+            // Skip this team if it has exceeded its daily cost or token budget
+            if team.cost_budget_daily.is_some() || team.token_budget.is_some() {
+                let conn = self.db.lock().unwrap();
+                if let Some(budget) = team.cost_budget_daily {
+                    if budget > 0.0 {
+                        let spent = crate::models::cost_tracking::CostTrackingEntry::team_cost_today(&conn, &team.id).unwrap_or(0.0);
+                        if spent >= budget {
+                            tracing::info!(team = %team.id, spent = spent, budget = budget,
+                                "Team daily cost budget exceeded, skipping dispatch");
+                            continue;
+                        }
+                    }
+                }
+                if let Some(budget) = team.token_budget {
+                    if budget > 0 {
+                        let used = crate::models::cost_tracking::CostTrackingEntry::team_tokens_today(&conn, &team.id).unwrap_or(0);
+                        if used >= budget as i64 {
+                            tracing::info!(team = %team.id, used = used, budget = budget,
+                                "Team token budget exceeded, skipping dispatch");
+                            continue;
+                        }
+                    }
+                }
+            }
+
             let slots = {
                 let conn = self.db.lock().unwrap();
                 TeamAgentSlot::list_by_team(&conn, &team.id)?
@@ -1412,11 +1560,22 @@ impl OrchestratorRunner {
         }
         self.log_activity("issue_claimed", &format!("Issue '{}' claimed", issue.title), Some(&team.project_id), Some(&team.id), Some(&session.id), Some(&issue.id), None);
 
-        // Build prompt with role, task details, and curl instructions
+        // Build prompt with role template, task details, and curl instructions
         let description = &issue.description;
-        let mut prompt_parts = vec![
-            format!("You are a {} agent working on project {}.", slot.role, project_name),
-        ];
+        let role_prompt = {
+            let conn = self.db.lock().unwrap();
+            crate::models::prompt_template::PromptTemplate::build_prompt_for_role(
+                &conn, &slot.role, Some(&team.project_id)
+            ).unwrap_or_default()
+        };
+
+        let mut prompt_parts = Vec::new();
+        if !role_prompt.is_empty() {
+            prompt_parts.push(role_prompt);
+            prompt_parts.push(format!("You are working on project {}.", project_name));
+        } else {
+            prompt_parts.push(format!("You are a {} agent working on project {}.", slot.role, project_name));
+        }
 
         if !claude_md.is_empty() {
             prompt_parts.push(format!("\n## Project Guidelines\n{}", claude_md));

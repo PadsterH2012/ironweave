@@ -9,7 +9,7 @@ pub async fn create(
     Json(mut input): Json<CreateIssue>,
 ) -> Result<(StatusCode, Json<Issue>), StatusCode> {
     input.project_id = project_id;
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Issue::create(&conn, &input)
         .map(|i| (StatusCode::CREATED, Json(i)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -18,19 +18,19 @@ pub async fn create(
 pub async fn list(
     State(state): State<AppState>,
     Path(_project_id): Path<String>,
-) -> Json<Vec<Issue>> {
-    let conn = state.db.lock().unwrap();
+) -> Result<Json<Vec<Issue>>, StatusCode> {
+    let conn = state.conn()?;
     // Issue::list returns all issues; filter by project in memory
     let all = Issue::list(&conn).unwrap_or_default();
     let filtered: Vec<Issue> = all.into_iter().filter(|i| i.project_id == _project_id).collect();
-    Json(filtered)
+    Ok(Json(filtered))
 }
 
 pub async fn get(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<Json<Issue>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Issue::get_by_id(&conn, &id)
         .map(Json)
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -40,7 +40,7 @@ pub async fn delete(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<StatusCode, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Issue::delete(&conn, &id)
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -51,7 +51,7 @@ pub async fn update(
     Path((_pid, id)): Path<(String, String)>,
     Json(input): Json<UpdateIssue>,
 ) -> Result<Json<Issue>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Issue::update(&conn, &id, &input)
         .map(Json)
         .map_err(|e| match e {
@@ -70,7 +70,7 @@ pub async fn claim(
     Path((_pid, id)): Path<(String, String)>,
     Json(body): Json<ClaimBody>,
 ) -> Result<Json<Issue>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Issue::claim(&conn, &id, &body.agent_session_id)
         .map(Json)
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -80,7 +80,7 @@ pub async fn unclaim(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<Json<Issue>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Issue::unclaim(&conn, &id)
         .map(Json)
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -90,7 +90,7 @@ pub async fn children(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<Json<Vec<Issue>>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Issue::get_children(&conn, &id)
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -99,7 +99,7 @@ pub async fn children(
 pub async fn ready(
     State(state): State<AppState>,
     Path(project_id): Path<String>,
-) -> Json<Vec<Issue>> {
-    let conn = state.db.lock().unwrap();
-    Json(Issue::get_ready(&conn, &project_id).unwrap_or_default())
+) -> Result<Json<Vec<Issue>>, StatusCode> {
+    let conn = state.conn()?;
+    Ok(Json(Issue::get_ready(&conn, &project_id).unwrap_or_default()))
 }

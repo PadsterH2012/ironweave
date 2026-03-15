@@ -279,6 +279,29 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     // Add app_url to projects
     let _ = conn.execute("ALTER TABLE projects ADD COLUMN app_url TEXT", []);
 
+    // ── Prompt Template Library ─────────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS prompt_templates (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            template_type TEXT NOT NULL DEFAULT 'role' CHECK(template_type IN ('role', 'skill')),
+            content TEXT NOT NULL DEFAULT '',
+            project_id TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
+        CREATE TABLE IF NOT EXISTS prompt_template_assignments (
+            id TEXT PRIMARY KEY,
+            role TEXT NOT NULL,
+            template_id TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (template_id) REFERENCES prompt_templates(id) ON DELETE CASCADE,
+            UNIQUE(role, template_id)
+        );
+    ")?;
+
     // ── Workflow Gate Approvals ──────────────────────────────────────
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS workflow_gate_approvals (
@@ -288,6 +311,266 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             PRIMARY KEY (instance_id, stage_id)
         );
     ")?;
+
+    // ── Cost Tracking (v2 Phase 1.2) ─────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS cost_tracking (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            period TEXT NOT NULL CHECK(period IN ('daily', 'weekly', 'monthly')),
+            period_start TEXT NOT NULL,
+            total_tokens INTEGER NOT NULL DEFAULT 0,
+            total_cost_usd REAL NOT NULL DEFAULT 0.0,
+            by_tier TEXT NOT NULL DEFAULT '{}',
+            by_role TEXT NOT NULL DEFAULT '{}',
+            by_model TEXT NOT NULL DEFAULT '{}',
+            task_count INTEGER NOT NULL DEFAULT 0,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            escalation_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, period, period_start)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cost_tracking_project ON cost_tracking(project_id);
+        CREATE INDEX IF NOT EXISTS idx_cost_tracking_period ON cost_tracking(period, period_start);
+    ")?;
+
+    // ── Global Role Registry (v2 Phase 1.3) ──────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS roles (
+            name TEXT PRIMARY KEY,
+            category TEXT NOT NULL DEFAULT 'General',
+            default_runtime TEXT NOT NULL DEFAULT 'claude'
+                CHECK(default_runtime IN ('claude', 'opencode', 'gemini')),
+            default_provider TEXT NOT NULL DEFAULT 'anthropic',
+            default_model TEXT,
+            default_skills TEXT NOT NULL DEFAULT '[]',
+            min_model_tier INTEGER NOT NULL DEFAULT 1 CHECK(min_model_tier BETWEEN 1 AND 5),
+            description TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+    ")?;
+
+    // ── Quality Tiers (v2 Phase 2.1) ────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS quality_tiers (
+            tier INTEGER PRIMARY KEY CHECK(tier BETWEEN 1 AND 5),
+            label TEXT NOT NULL,
+            example_models TEXT NOT NULL DEFAULT '',
+            cost_range TEXT NOT NULL DEFAULT ''
+        );
+        INSERT OR IGNORE INTO quality_tiers (tier, label, example_models, cost_range) VALUES
+            (1, 'Free/Local', 'llama-3.1-8b, gemma-3-8b, qwen-2.5-7b', 'Free'),
+            (2, 'Budget', 'llama-3.1-70b, gemma-3-27b, qwen-2.5-72b', '¢'),
+            (3, 'Mid', 'claude-haiku-4-5, deepseek-v3, mistral-large', '$'),
+            (4, 'High', 'claude-sonnet-4-6, gemini-2.5-flash', '$$'),
+            (5, 'Premium', 'claude-opus-4-6, gemini-2.5-pro', '$$$');
+    ")?;
+
+    // Add tier_floor / tier_ceiling to projects and teams
+    let _ = conn.execute("ALTER TABLE projects ADD COLUMN tier_floor INTEGER NOT NULL DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE projects ADD COLUMN tier_ceiling INTEGER NOT NULL DEFAULT 5", []);
+    let _ = conn.execute("ALTER TABLE teams ADD COLUMN tier_floor INTEGER", []);
+    let _ = conn.execute("ALTER TABLE teams ADD COLUMN tier_ceiling INTEGER", []);
+
+    // ── Model Performance Log (v2 Phase 2.2) ─────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS model_performance_log (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            role TEXT NOT NULL,
+            runtime TEXT NOT NULL,
+            provider TEXT NOT NULL DEFAULT 'anthropic',
+            model TEXT NOT NULL,
+            tier INTEGER NOT NULL DEFAULT 3,
+            task_type TEXT NOT NULL DEFAULT 'task',
+            task_complexity INTEGER NOT NULL DEFAULT 3,
+            outcome TEXT NOT NULL CHECK(outcome IN ('success', 'failure', 'partial', 'timeout')),
+            failure_reason TEXT,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            cost_usd REAL NOT NULL DEFAULT 0.0,
+            duration_seconds INTEGER NOT NULL DEFAULT 0,
+            retries INTEGER NOT NULL DEFAULT 0,
+            escalated_from TEXT,
+            complexity_score INTEGER,
+            files_touched TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_perf_log_project ON model_performance_log(project_id);
+        CREATE INDEX IF NOT EXISTS idx_perf_log_role_model ON model_performance_log(role, model);
+        CREATE INDEX IF NOT EXISTS idx_perf_log_outcome ON model_performance_log(outcome);
+    ")?;
+
+    // ── Coordinator Memory (v2 Phase 2.3) ────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS coordinator_memory (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id) UNIQUE,
+            state TEXT NOT NULL DEFAULT 'dormant' CHECK(state IN ('active', 'dormant')),
+            session_id TEXT,
+            last_active_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+    ")?;
+
+    // ── Phase 2.4: Coordination-mode-dependent skills ─────────────────
+    // Add is_system flag and coordination_mode to prompt_templates
+    let _ = conn.execute("ALTER TABLE prompt_templates ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE prompt_templates ADD COLUMN coordination_mode TEXT", []);
+
+    // Seed system skill templates for each coordination mode
+    conn.execute_batch("
+        INSERT OR IGNORE INTO prompt_templates (id, name, template_type, content, is_system, coordination_mode)
+        VALUES
+        ('sys-skill-pipeline', 'Pipeline Coordination', 'skill',
+         'You are working in a **pipeline** coordination mode. Work flows sequentially through roles in a defined order. When you complete your task, update the issue status so the next agent in the pipeline can pick it up. Do NOT work on tasks that are not assigned to your role in the pipeline sequence. Focus on doing your part well and handing off cleanly.',
+         1, 'pipeline'),
+
+        ('sys-skill-swarm', 'Swarm Coordination', 'skill',
+         'You are working in a **swarm** coordination mode. All agents work independently, claiming tasks from a shared pool. Claim one task at a time, complete it fully, then claim the next. Avoid working on tasks another agent has already claimed. If you encounter a dependency on another task, skip it and move to a different one.',
+         1, 'swarm'),
+
+        ('sys-skill-collaborative', 'Collaborative Coordination', 'skill',
+         'You are working in a **collaborative** coordination mode. Multiple agents may work on related aspects of the same problem simultaneously. Coordinate through issue comments and loom entries. Before making changes to shared files, check recent loom entries for conflicts. Prefer small, focused commits that are easy to merge.',
+         1, 'collaborative'),
+
+        ('sys-skill-hierarchical', 'Hierarchical Coordination', 'skill',
+         'You are working in a **hierarchical** coordination mode. A lead agent (Architect or Coordinator) decomposes work and assigns sub-tasks. Follow the decomposed task assignments precisely. Report progress via loom entries so the lead can track overall status. If you encounter issues outside your assigned scope, create a new issue rather than fixing it yourself.',
+         1, 'hierarchical');
+    ")?;
+
+    // ── Phase 3.1: Model Routing Overrides ─────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS model_routing_overrides (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            role TEXT NOT NULL,
+            task_type TEXT NOT NULL DEFAULT 'task',
+            from_model TEXT,
+            to_model TEXT NOT NULL,
+            to_tier INTEGER NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            confidence REAL NOT NULL DEFAULT 0.5,
+            status TEXT NOT NULL DEFAULT 'suggested'
+                CHECK(status IN ('suggested', 'accepted', 'rejected', 'expired')),
+            evidence TEXT NOT NULL DEFAULT '{}',
+            observations INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            resolved_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_routing_overrides_project ON model_routing_overrides(project_id, status);
+        CREATE INDEX IF NOT EXISTS idx_routing_overrides_role ON model_routing_overrides(role, task_type);
+    ")?;
+
+    // ── Phase 3.3: Team-Level Model Overrides ──────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS team_role_overrides (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            role TEXT NOT NULL,
+            runtime TEXT,
+            provider TEXT,
+            model TEXT,
+            is_user_set INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(team_id, role)
+        );
+    ")?;
+
+    // ══════════════════════════════════════════════════════════════════
+    // Phase 4 — Intelligence
+    // ══════════════════════════════════════════════════════════════════
+
+    // ── Phase 4.1: Knowledge Graph ─────────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS code_graph_nodes (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            node_type TEXT NOT NULL CHECK(node_type IN ('file', 'function', 'class', 'module')),
+            path TEXT NOT NULL,
+            name TEXT NOT NULL,
+            language TEXT,
+            line_start INTEGER,
+            line_end INTEGER,
+            complexity_score INTEGER NOT NULL DEFAULT 1,
+            last_indexed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, path, name, node_type)
+        );
+        CREATE INDEX IF NOT EXISTS idx_graph_nodes_project ON code_graph_nodes(project_id);
+        CREATE INDEX IF NOT EXISTS idx_graph_nodes_path ON code_graph_nodes(project_id, path);
+
+        CREATE TABLE IF NOT EXISTS code_graph_edges (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            source_node_id TEXT NOT NULL REFERENCES code_graph_nodes(id) ON DELETE CASCADE,
+            target_node_id TEXT NOT NULL REFERENCES code_graph_nodes(id) ON DELETE CASCADE,
+            edge_type TEXT NOT NULL CHECK(edge_type IN ('imports', 'calls', 'extends', 'implements', 'contains', 'references')),
+            weight INTEGER NOT NULL DEFAULT 1,
+            UNIQUE(source_node_id, target_node_id, edge_type)
+        );
+        CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON code_graph_edges(source_node_id);
+        CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON code_graph_edges(target_node_id);
+    ")?;
+
+    // ── Phase 4.2: Workflow Recording ──────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS workflow_traces (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            agent_session_id TEXT NOT NULL,
+            performance_log_id TEXT,
+            issue_id TEXT,
+            started_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT,
+            total_steps INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'recording' CHECK(status IN ('recording', 'completed', 'failed'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_traces_project ON workflow_traces(project_id);
+        CREATE INDEX IF NOT EXISTS idx_traces_session ON workflow_traces(agent_session_id);
+
+        CREATE TABLE IF NOT EXISTS workflow_trace_steps (
+            id TEXT PRIMARY KEY,
+            trace_id TEXT NOT NULL REFERENCES workflow_traces(id) ON DELETE CASCADE,
+            step_number INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            files_touched TEXT,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            outcome TEXT CHECK(outcome IN ('success', 'failure', 'skipped')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_trace_steps_trace ON workflow_trace_steps(trace_id);
+
+        CREATE TABLE IF NOT EXISTS workflow_chokepoints (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            action TEXT NOT NULL,
+            role TEXT,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            total_count INTEGER NOT NULL DEFAULT 0,
+            avg_duration_ms INTEGER NOT NULL DEFAULT 0,
+            last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(project_id, action, role)
+        );
+    ")?;
+
+    // ── Phase 4.3: Context Window Management ───────────────────────────
+    // Add context window limits to quality_tiers
+    let _ = conn.execute("ALTER TABLE quality_tiers ADD COLUMN max_context_tokens INTEGER NOT NULL DEFAULT 200000", []);
+    let _ = conn.execute("ALTER TABLE quality_tiers ADD COLUMN max_output_tokens INTEGER NOT NULL DEFAULT 8192", []);
+
+    // Update with realistic limits per tier
+    let _ = conn.execute("UPDATE quality_tiers SET max_context_tokens = 8192, max_output_tokens = 2048 WHERE tier = 1", []);
+    let _ = conn.execute("UPDATE quality_tiers SET max_context_tokens = 32000, max_output_tokens = 4096 WHERE tier = 2", []);
+    let _ = conn.execute("UPDATE quality_tiers SET max_context_tokens = 200000, max_output_tokens = 8192 WHERE tier = 3", []);
+    let _ = conn.execute("UPDATE quality_tiers SET max_context_tokens = 200000, max_output_tokens = 16384 WHERE tier = 4", []);
+    let _ = conn.execute("UPDATE quality_tiers SET max_context_tokens = 200000, max_output_tokens = 32000 WHERE tier = 5", []);
+
+    // ── Phase 4.4: Cross-Project Learning ──────────────────────────────
+    let _ = conn.execute("ALTER TABLE projects ADD COLUMN share_learning INTEGER NOT NULL DEFAULT 0", []);
 
     Ok(())
 }

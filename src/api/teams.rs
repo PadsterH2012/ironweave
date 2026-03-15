@@ -9,7 +9,7 @@ pub async fn create(
     Json(mut input): Json<CreateTeam>,
 ) -> Result<(StatusCode, Json<Team>), StatusCode> {
     input.project_id = project_id;
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Team::create(&conn, &input)
         .map(|t| (StatusCode::CREATED, Json(t)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -18,16 +18,16 @@ pub async fn create(
 pub async fn list(
     State(state): State<AppState>,
     Path(project_id): Path<String>,
-) -> Json<Vec<Team>> {
-    let conn = state.db.lock().unwrap();
-    Json(Team::list_by_project(&conn, &project_id).unwrap_or_default())
+) -> Result<Json<Vec<Team>>, StatusCode> {
+    let conn = state.conn()?;
+    Ok(Json(Team::list_by_project(&conn, &project_id).unwrap_or_default()))
 }
 
 pub async fn get(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<Json<Team>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Team::get_by_id(&conn, &id)
         .map(Json)
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -37,7 +37,7 @@ pub async fn delete(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<StatusCode, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Team::delete(&conn, &id)
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -49,7 +49,7 @@ pub async fn create_slot(
     Json(mut input): Json<CreateTeamAgentSlot>,
 ) -> Result<(StatusCode, Json<TeamAgentSlot>), StatusCode> {
     input.team_id = team_id;
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     TeamAgentSlot::create(&conn, &input)
         .map(|s| (StatusCode::CREATED, Json(s)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -58,9 +58,9 @@ pub async fn create_slot(
 pub async fn list_slots(
     State(state): State<AppState>,
     Path(team_id): Path<String>,
-) -> Json<Vec<TeamAgentSlot>> {
-    let conn = state.db.lock().unwrap();
-    Json(TeamAgentSlot::list_by_team(&conn, &team_id).unwrap_or_default())
+) -> Result<Json<Vec<TeamAgentSlot>>, StatusCode> {
+    let conn = state.conn()?;
+    Ok(Json(TeamAgentSlot::list_by_team(&conn, &team_id).unwrap_or_default()))
 }
 
 pub async fn update_slot(
@@ -68,7 +68,7 @@ pub async fn update_slot(
     Path((_tid, id)): Path<(String, String)>,
     Json(input): Json<UpdateTeamAgentSlot>,
 ) -> Result<Json<TeamAgentSlot>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     TeamAgentSlot::update(&conn, &id, &input)
         .map(Json)
         .map_err(|e| match e {
@@ -81,7 +81,7 @@ pub async fn delete_slot(
     State(state): State<AppState>,
     Path((_tid, id)): Path<(String, String)>,
 ) -> Result<StatusCode, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     TeamAgentSlot::delete(&conn, &id)
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -89,24 +89,24 @@ pub async fn delete_slot(
 
 pub async fn list_templates(
     State(state): State<AppState>,
-) -> Json<Vec<Team>> {
-    let conn = state.db.lock().unwrap();
-    Json(Team::list_templates(&conn, None).unwrap_or_default())
+) -> Result<Json<Vec<Team>>, StatusCode> {
+    let conn = state.conn()?;
+    Ok(Json(Team::list_templates(&conn, None).unwrap_or_default()))
 }
 
 pub async fn list_project_templates(
     State(state): State<AppState>,
     Path(project_id): Path<String>,
-) -> Json<Vec<Team>> {
-    let conn = state.db.lock().unwrap();
-    Json(Team::list_templates(&conn, Some(&project_id)).unwrap_or_default())
+) -> Result<Json<Vec<Team>>, StatusCode> {
+    let conn = state.conn()?;
+    Ok(Json(Team::list_templates(&conn, Some(&project_id)).unwrap_or_default()))
 }
 
 pub async fn clone_template(
     State(state): State<AppState>,
     Path((project_id, template_id)): Path<(String, String)>,
 ) -> Result<(StatusCode, Json<Team>), StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Team::clone_into_project(&conn, &template_id, &project_id)
         .map(|t| (StatusCode::CREATED, Json(t)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -116,7 +116,7 @@ pub async fn activate(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<Json<Team>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Team::set_active(&conn, &id, true)
         .map(Json)
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -126,7 +126,7 @@ pub async fn deactivate(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<Json<Team>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     Team::set_active(&conn, &id, false)
         .map(Json)
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -142,7 +142,7 @@ pub async fn update_config(
     Path((_pid, id)): Path<(String, String)>,
     Json(input): Json<UpdateAutoPickup>,
 ) -> Result<Json<Team>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     let type_refs: Vec<&str> = input.types.iter().map(|s| s.as_str()).collect();
     Team::update_auto_pickup_types(&conn, &id, &type_refs)
         .map(Json)
@@ -156,11 +156,29 @@ pub async fn team_status(
     State(state): State<AppState>,
     Path((_pid, id)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     let team = Team::get_by_id(&conn, &id).map_err(|_| StatusCode::NOT_FOUND)?;
     let slots = TeamAgentSlot::list_by_team(&conn, &id).unwrap_or_default();
 
-    // Count running agents per role
+    // Batch query: running agents per role (single query instead of N)
+    let mut running_by_role: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT tas.role, COUNT(*) FROM agent_sessions a \
+             JOIN team_agent_slots tas ON a.slot_id = tas.id \
+             WHERE a.team_id = ?1 AND a.state = 'running' \
+             GROUP BY tas.role"
+        ).unwrap();
+        let rows = stmt.query_map(params![id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        }).unwrap();
+        for row in rows {
+            if let Ok((role, count)) = row {
+                running_by_role.insert(role, count);
+            }
+        }
+    }
+
     let mut role_status: Vec<serde_json::Value> = Vec::new();
     let mut seen_roles = std::collections::HashSet::new();
     for slot in &slots {
@@ -168,12 +186,7 @@ pub async fn team_status(
             continue;
         }
         let slot_count = slots.iter().filter(|s| s.role == slot.role).count();
-        let running: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM agent_sessions WHERE team_id = ?1 AND state = 'running'
-             AND slot_id IN (SELECT id FROM team_agent_slots WHERE team_id = ?1 AND role = ?2)",
-            params![id, slot.role],
-            |row| row.get(0),
-        ).unwrap_or(0);
+        let running = *running_by_role.get(&slot.role).unwrap_or(&0);
         role_status.push(serde_json::json!({
             "role": slot.role,
             "slot_count": slot_count,
@@ -183,17 +196,15 @@ pub async fn team_status(
         }));
     }
 
-    // Scaling recommendation
-    let total_running: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM agent_sessions WHERE team_id = ?1 AND state = 'running'",
+    // Scaling recommendation — single query for running + idle counts
+    let (total_running, total_idle): (i64, i64) = conn.query_row(
+        "SELECT \
+            COALESCE(SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END), 0), \
+            COALESCE(SUM(CASE WHEN state IN ('idle', 'ready') THEN 1 ELSE 0 END), 0) \
+         FROM agent_sessions WHERE team_id = ?1",
         params![id],
-        |row| row.get(0),
-    ).unwrap_or(0);
-    let total_idle: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM agent_sessions WHERE team_id = ?1 AND state IN ('idle', 'ready')",
-        params![id],
-        |row| row.get(0),
-    ).unwrap_or(0);
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap_or((0, 0));
     let pool_depth: i64 = conn.query_row(
         "SELECT COUNT(*) FROM issues WHERE project_id = ?1 AND status = 'open' AND claimed_by IS NULL AND needs_intake = 0",
         params![team.project_id],

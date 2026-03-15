@@ -1,4 +1,5 @@
 use axum::{extract::{Query, State}, Json};
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use crate::state::AppState;
 use crate::models::project::Project;
@@ -13,12 +14,12 @@ pub struct DashboardStats {
     pub running_workflows: usize,
 }
 
-pub async fn stats(State(state): State<AppState>) -> Json<DashboardStats> {
+pub async fn stats(State(state): State<AppState>) -> Result<Json<DashboardStats>, StatusCode> {
     let project_count;
     let open_issues;
     let running_workflows;
     {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         project_count = Project::list(&conn).map(|p| p.len()).unwrap_or(0);
         open_issues = Issue::list(&conn)
             .map(|issues| issues.into_iter().filter(|i| i.status == "open").count())
@@ -30,12 +31,12 @@ pub async fn stats(State(state): State<AppState>) -> Json<DashboardStats> {
     }
     let active_agents = state.process_manager.list_active().await.len();
 
-    Json(DashboardStats {
+    Ok(Json(DashboardStats {
         project_count,
         active_agents,
         open_issues,
         running_workflows,
-    })
+    }))
 }
 
 // --- Activity endpoint ---
@@ -50,10 +51,10 @@ pub struct ActivityQuery {
 pub async fn activity(
     State(state): State<AppState>,
     Query(params): Query<ActivityQuery>,
-) -> Json<Vec<ActivityLogEntry>> {
+) -> Result<Json<Vec<ActivityLogEntry>>, StatusCode> {
     let limit = params.limit.unwrap_or(50);
     let offset = params.offset.unwrap_or(0);
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
 
     let entries = if let Some(ref project_id) = params.project_id {
         ActivityLogEntry::list_by_project(&conn, project_id, limit).unwrap_or_default()
@@ -61,7 +62,7 @@ pub async fn activity(
         ActivityLogEntry::list_recent(&conn, limit, offset).unwrap_or_default()
     };
 
-    Json(entries)
+    Ok(Json(entries))
 }
 
 // --- Metrics endpoint ---
@@ -89,9 +90,9 @@ pub struct MetricsResponse {
 pub async fn metrics(
     State(state): State<AppState>,
     Query(params): Query<MetricsQuery>,
-) -> Json<MetricsResponse> {
+) -> Result<Json<MetricsResponse>, StatusCode> {
     let days = params.days.unwrap_or(7);
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
 
     let daily = ActivityLogEntry::daily_metrics(&conn, days).unwrap_or_default();
 
@@ -124,11 +125,11 @@ pub async fn metrics(
         .unwrap_or(None)
         .unwrap_or(0.0);
 
-    Json(MetricsResponse {
+    Ok(Json(MetricsResponse {
         daily,
         merge_stats,
         avg_resolution_hours,
-    })
+    }))
 }
 
 // --- System endpoint ---

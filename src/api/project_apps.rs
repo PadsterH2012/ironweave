@@ -50,7 +50,7 @@ pub async fn start(
 ) -> Result<Json<AppStatus>, StatusCode> {
     // Get project from DB
     let project = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         Project::get_by_id(&conn, &id).map_err(|_| StatusCode::NOT_FOUND)?
     };
 
@@ -63,7 +63,7 @@ pub async fn start(
 
     // Upsert the project app record
     let app = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         ProjectApp::upsert(&conn, &id, &run_command)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
@@ -76,7 +76,7 @@ pub async fn start(
     // Start the app
     match state.app_runner.start_app(&app.id, &project.directory, &detected).await {
         Ok((port, pid)) => {
-            let conn = state.db.lock().unwrap();
+            let conn = state.conn()?;
             ProjectApp::update_state(&conn, &app.id, "running", Some(pid as i64), Some(port), None)
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             let updated = ProjectApp::get_by_project(&conn, &id)
@@ -85,7 +85,7 @@ pub async fn start(
             Ok(Json(AppStatus::from_app(&updated)))
         }
         Err(e) => {
-            let conn = state.db.lock().unwrap();
+            let conn = state.conn()?;
             let _ = ProjectApp::update_state(&conn, &app.id, "error", None, None, Some(&e));
             let updated = ProjectApp::get_by_project(&conn, &id)
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -100,7 +100,7 @@ pub async fn stop(
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
     let app = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         ProjectApp::get_by_project(&conn, &id)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .ok_or(StatusCode::NOT_FOUND)?
@@ -109,7 +109,7 @@ pub async fn stop(
     state.app_runner.stop_app(&app.id).await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     ProjectApp::update_state(&conn, &app.id, "stopped", None, None, None)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -121,7 +121,7 @@ pub async fn status(
     Path(id): Path<String>,
 ) -> Result<Json<AppStatus>, StatusCode> {
     let app = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         ProjectApp::get_by_project(&conn, &id)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
@@ -130,7 +130,7 @@ pub async fn status(
         Some(app) => {
             if app.state == "running" && !state.app_runner.check_running(&app.id).await {
                 // Process died — update to stopped
-                let conn = state.db.lock().unwrap();
+                let conn = state.conn()?;
                 let _ = ProjectApp::update_state(&conn, &app.id, "stopped", None, None, None);
                 let updated = ProjectApp::get_by_project(&conn, &id)
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?

@@ -25,10 +25,10 @@ impl From<ProxyConfig> for ProxyConfigResponse {
     }
 }
 
-pub async fn list(State(state): State<AppState>) -> Json<Vec<ProxyConfigResponse>> {
-    let conn = state.db.lock().unwrap();
+pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<ProxyConfigResponse>>, StatusCode> {
+    let conn = state.conn()?;
     let configs = ProxyConfig::list(&conn).unwrap_or_default();
-    Json(configs.into_iter().map(ProxyConfigResponse::from).collect())
+    Ok(Json(configs.into_iter().map(ProxyConfigResponse::from).collect()))
 }
 
 pub async fn create(
@@ -46,7 +46,7 @@ pub async fn create(
             return Err(StatusCode::BAD_REQUEST);
         }
     }
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     ProxyConfig::create(&conn, &input)
         .map(|pc| (StatusCode::CREATED, Json(ProxyConfigResponse::from(pc))))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -56,7 +56,7 @@ pub async fn get(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<ProxyConfigResponse>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     ProxyConfig::get_by_id(&conn, &id)
         .map(|pc| Json(ProxyConfigResponse::from(pc)))
         .map_err(|_| StatusCode::NOT_FOUND)
@@ -67,7 +67,7 @@ pub async fn update(
     Path(id): Path<String>,
     Json(input): Json<UpdateProxyConfig>,
 ) -> Result<Json<ProxyConfigResponse>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
     ProxyConfig::update(&conn, &id, &input)
         .map(|pc| Json(ProxyConfigResponse::from(pc)))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -77,7 +77,7 @@ pub async fn delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn().map_err(|s| (s, "database unavailable".into()))?;
     ProxyConfig::delete(&conn, &id).map(|_| StatusCode::NO_CONTENT).map_err(|e| {
         let msg = e.to_string();
         if msg.contains("referenced") {
@@ -95,7 +95,7 @@ pub async fn test_connection(
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let pc = {
-        let conn = state.db.lock().unwrap();
+        let conn = state.conn()?;
         ProxyConfig::get_by_id(&conn, &id).map_err(|_| StatusCode::NOT_FOUND)?
     };
 

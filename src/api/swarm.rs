@@ -30,7 +30,7 @@ pub async fn get_status(
     State(state): State<AppState>,
     Path(pid): Path<String>,
 ) -> Result<Json<SwarmStatus>, StatusCode> {
-    let conn = state.db.lock().unwrap();
+    let conn = state.conn()?;
 
     // Get primary team for this project
     let teams = Team::list_by_project(&conn, &pid).unwrap_or_default();

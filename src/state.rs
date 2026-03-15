@@ -1,4 +1,6 @@
-use std::sync::Arc;
+use std::sync::{Arc, MutexGuard};
+use axum::http::StatusCode;
+use rusqlite::Connection;
 use crate::auth::AuthConfig;
 use crate::db::DbPool;
 use crate::process::manager::ProcessManager;
@@ -20,6 +22,11 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Acquire database connection, returning 500 if the mutex is poisoned.
+    pub fn conn(&self) -> Result<MutexGuard<'_, Connection>, StatusCode> {
+        self.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    }
+
     pub fn browse_roots(&self) -> Vec<String> {
         self.filesystem_config
             .as_ref()

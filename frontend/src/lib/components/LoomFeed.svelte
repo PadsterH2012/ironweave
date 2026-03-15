@@ -1,5 +1,6 @@
 <script lang="ts">
   import { loom, type LoomEntry } from '../api';
+  import { timeAgo } from '../utils';
 
   interface Props {
     projectId?: string;
@@ -18,18 +19,6 @@
 
   // Use external entries if provided, otherwise internal (self-polling)
   let entries = $derived(externalEntries ?? internalEntries);
-
-  function timeAgo(iso: string): string {
-    const diff = Date.now() - new Date(iso).getTime();
-    const secs = Math.floor(diff / 1000);
-    if (secs < 60) return `${secs}s ago`;
-    const mins = Math.floor(secs / 60);
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    return `${days}d ago`;
-  }
 
   function typeIcon(entryType: string): string {
     switch (entryType) {
@@ -89,7 +78,7 @@
       } else {
         internalEntries = await loom.recent(100);
       }
-    } catch { /* ignore poll errors */ }
+    } catch (e) { console.warn('Loom poll failed:', e); }
   }
 
   // Auto-scroll when entries change
@@ -102,7 +91,7 @@
 
   // Self-polling when no external entries provided
   $effect(() => {
-    if (!externalEntries && (projectId || teamId || true)) {
+    if (!externalEntries) {
       poll();
       pollTimer = setInterval(poll, pollInterval);
     }

@@ -59,6 +59,19 @@ impl Mount {
     }
 
     pub fn create(conn: &Connection, input: &CreateMount) -> Result<Self> {
+        // Validate local_mount_point: must be absolute, no traversal, not a dangerous system path
+        let mount_path = std::path::Path::new(&input.local_mount_point);
+        if !mount_path.is_absolute() {
+            return Err(IronweaveError::Validation("local_mount_point must be an absolute path".into()));
+        }
+        if input.local_mount_point.contains("..") {
+            return Err(IronweaveError::Validation("local_mount_point must not contain path traversal".into()));
+        }
+        let dangerous_paths = ["/", "/etc", "/sys", "/proc", "/dev", "/boot", "/bin", "/sbin", "/usr", "/lib", "/var"];
+        let normalized = input.local_mount_point.trim_end_matches('/');
+        if dangerous_paths.contains(&normalized) {
+            return Err(IronweaveError::Validation("local_mount_point must not be a system directory".into()));
+        }
         let id = Uuid::new_v4().to_string();
         let auto_mount = input.auto_mount.unwrap_or(true) as i32;
         conn.execute(
@@ -103,6 +116,19 @@ impl Mount {
     }
 
     pub fn update(conn: &Connection, id: &str, input: &CreateMount) -> Result<Self> {
+        // Same mount path validation as create
+        let mount_path = std::path::Path::new(&input.local_mount_point);
+        if !mount_path.is_absolute() {
+            return Err(IronweaveError::Validation("local_mount_point must be an absolute path".into()));
+        }
+        if input.local_mount_point.contains("..") {
+            return Err(IronweaveError::Validation("local_mount_point must not contain path traversal".into()));
+        }
+        let dangerous_paths = ["/", "/etc", "/sys", "/proc", "/dev", "/boot", "/bin", "/sbin", "/usr", "/lib", "/var"];
+        let normalized = input.local_mount_point.trim_end_matches('/');
+        if dangerous_paths.contains(&normalized) {
+            return Err(IronweaveError::Validation("local_mount_point must not be a system directory".into()));
+        }
         let auto_mount = input.auto_mount.unwrap_or(true) as i32;
         let changes = conn.execute(
             "UPDATE mounts SET name = ?1, mount_type = ?2, remote_path = ?3, local_mount_point = ?4,

@@ -20,11 +20,18 @@
     '/projects/:id/workflows/:wid': WorkflowView,
     '/mounts': Mounts,
     '/agents': Agents,
-    '/settings': SettingsGeneral,
     '/settings/general': SettingsGeneral,
     '/settings/proxies': SettingsProxies,
     '/settings/api-keys': SettingsApiKeys,
   };
+
+  // Redirect /settings to /settings/general
+  $effect(() => {
+    const unsub = location.subscribe((loc) => {
+      if (loc === '/settings') push('/settings/general');
+    });
+    return unsub;
+  });
 
   let backendStatus = $state('checking...');
   let authEnabled = $state<boolean | null>(null);

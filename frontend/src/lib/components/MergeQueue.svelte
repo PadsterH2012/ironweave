@@ -1,5 +1,6 @@
 <script lang="ts">
   import { mergeQueue, type MergeQueueEntry, type MergeQueueDiff } from '../api';
+  import { timeAgo } from '../utils';
   import { onMount } from 'svelte';
 
   interface Props {
@@ -107,19 +108,6 @@
       case 'rejected': return 'bg-gray-600 text-gray-100';
       default: return 'bg-gray-600 text-gray-100';
     }
-  }
-
-  function timeAgo(dateStr: string): string {
-    const now = Date.now();
-    const then = new Date(dateStr).getTime();
-    const seconds = Math.floor((now - then) / 1000);
-    if (seconds < 60) return `${seconds}s ago`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
   }
 
   function parseConflictFiles(json: string): string[] {
