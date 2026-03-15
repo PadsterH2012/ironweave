@@ -34,8 +34,8 @@
     try {
       status = await swarm.status(projectId);
       error = null;
-    } catch (e: any) {
-      error = e.message;
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : 'Failed to load swarm status';
     } finally {
       loading = false;
     }

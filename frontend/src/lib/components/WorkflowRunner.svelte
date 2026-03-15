@@ -82,8 +82,8 @@
     error = null;
     try {
       definitions = await workflows.definitions.list(projectId);
-    } catch (e: any) {
-      error = e.message;
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : 'Failed to load workflows';
     } finally {
       loading = false;
     }
@@ -94,7 +94,8 @@
     selectedInstance = null;
     try {
       instances = await workflows.instances.list(def.id);
-    } catch {
+    } catch (e: unknown) {
+      console.warn('Failed to load instances:', e);
       instances = [];
     }
   }
@@ -105,8 +106,8 @@
       const inst = await workflows.instances.create(selectedDef.id, { definition_id: selectedDef.id });
       instances = [inst, ...instances];
       selectedInstance = inst;
-    } catch (e: any) {
-      error = e.message;
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : 'Failed to create instance';
     }
   }
 
@@ -115,8 +116,8 @@
     try {
       await workflows.instances.approveGate(selectedDef.id, selectedInstance.id, stageId);
       await refreshInstance();
-    } catch (e: any) {
-      error = e.message;
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : 'Failed to approve gate';
     }
   }
 
@@ -132,8 +133,8 @@
     try {
       await workflows.instances.pause(selectedDef.id, selectedInstance.id);
       await refreshInstance();
-    } catch (e: any) {
-      error = e.message;
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : 'Failed to pause instance';
     }
   }
 
@@ -142,8 +143,8 @@
     try {
       await workflows.instances.resume(selectedDef.id, selectedInstance.id);
       await refreshInstance();
-    } catch (e: any) {
-      error = e.message;
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : 'Failed to resume instance';
     }
   }
 
@@ -152,8 +153,8 @@
     try {
       await workflows.instances.cancel(selectedDef.id, selectedInstance.id);
       await refreshInstance();
-    } catch (e: any) {
-      error = e.message;
+    } catch (e: unknown) {
+      error = e instanceof Error ? e.message : 'Failed to cancel instance';
     }
   }
 

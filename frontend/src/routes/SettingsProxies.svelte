@@ -7,6 +7,7 @@
   let showForm: boolean = $state(false);
   let editing: string | null = $state(null);
   let saving: boolean = $state(false);
+  let loading: boolean = $state(true);
   let testing: string | null = $state(null);
   let testResult: TestConnectionResult | null = $state(null);
 
@@ -19,6 +20,8 @@
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to fetch proxy configs';
+    } finally {
+      loading = false;
     }
   }
 
@@ -186,7 +189,9 @@
       </div>
     {/if}
 
-    {#if configList.length === 0 && !showForm}
+    {#if loading}
+      <div class="rounded-xl bg-gray-900 border border-gray-800 p-8 text-center text-gray-500">Loading proxy configurations...</div>
+    {:else if configList.length === 0 && !showForm}
       <div class="rounded-xl bg-gray-900 border border-gray-800 p-8 text-center text-gray-500">
         No proxy configurations yet.
       </div>

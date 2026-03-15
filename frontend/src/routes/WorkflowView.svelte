@@ -300,7 +300,15 @@
         </div>
       </div>
     {/if}
-  {:else if !error}
+  {:else if error}
+    <div class="rounded-xl bg-gray-900 border border-gray-800 p-12 text-center space-y-3">
+      <p class="text-lg font-semibold text-gray-300">Workflow not found</p>
+      <p class="text-sm text-gray-500">{error}</p>
+      <button onclick={() => push(`/projects/${params.id}`)} class="mt-2 px-4 py-2 text-sm rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition-colors">
+        Back to project
+      </button>
+    </div>
+  {:else}
     <div class="text-gray-500">Loading workflow...</div>
   {/if}
 </div>

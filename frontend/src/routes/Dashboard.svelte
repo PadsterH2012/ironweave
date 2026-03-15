@@ -89,7 +89,7 @@
   function setDays(d: number) {
     metricsDays = d;
     // Re-fetch metrics with new range
-    dashboard.metrics(d).then(m => { metricsData = m; }).catch(() => {});
+    dashboard.metrics(d).then(m => { metricsData = m; }).catch(e => { console.warn('Failed to fetch metrics:', e); });
   }
 </script>
 

@@ -1,5 +1,17 @@
 use rusqlite::Connection;
 
+/// Run an ALTER TABLE migration, ignoring "duplicate column" errors (expected on re-run)
+/// but logging unexpected failures.
+fn migrate_alter(conn: &Connection, sql: &str) {
+    if let Err(e) = conn.execute(sql, []) {
+        let msg = e.to_string();
+        // "duplicate column name" is expected when migration has already run
+        if !msg.contains("duplicate column") {
+            tracing::warn!("Migration failed ({}): {}", sql.split_whitespace().take(6).collect::<Vec<_>>().join(" "), msg);
+        }
+    }
+}
+
 pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch("
         CREATE TABLE IF NOT EXISTS mounts (
@@ -170,42 +182,42 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     // Incremental migration: add mount_id to existing projects table
     // ALTER TABLE ADD COLUMN errors if column already exists, which is fine
-    let _ = conn.execute("ALTER TABLE projects ADD COLUMN mount_id TEXT REFERENCES mounts(id)", []);
-    let _ = conn.execute("ALTER TABLE mounts ADD COLUMN proxy_config_id TEXT REFERENCES proxy_configs(id)", []);
+    migrate_alter(conn,"ALTER TABLE projects ADD COLUMN mount_id TEXT REFERENCES mounts(id)");
+    migrate_alter(conn,"ALTER TABLE mounts ADD COLUMN proxy_config_id TEXT REFERENCES proxy_configs(id)");
 
-    let _ = conn.execute("ALTER TABLE projects ADD COLUMN description TEXT", []);
-    let _ = conn.execute("ALTER TABLE projects ADD COLUMN sync_path TEXT", []);
-    let _ = conn.execute("ALTER TABLE projects ADD COLUMN last_synced_at TEXT", []);
-    let _ = conn.execute("ALTER TABLE projects ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'idle'", []);
-    let _ = conn.execute("ALTER TABLE mounts ADD COLUMN git_remote TEXT", []);
+    migrate_alter(conn,"ALTER TABLE projects ADD COLUMN description TEXT");
+    migrate_alter(conn,"ALTER TABLE projects ADD COLUMN sync_path TEXT");
+    migrate_alter(conn,"ALTER TABLE projects ADD COLUMN last_synced_at TEXT");
+    migrate_alter(conn,"ALTER TABLE projects ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'idle'");
+    migrate_alter(conn,"ALTER TABLE mounts ADD COLUMN git_remote TEXT");
 
     // Add workflow linkage columns to issues
-    let _ = conn.execute("ALTER TABLE issues ADD COLUMN workflow_instance_id TEXT REFERENCES workflow_instances(id)", []);
-    let _ = conn.execute("ALTER TABLE issues ADD COLUMN stage_id TEXT", []);
+    migrate_alter(conn,"ALTER TABLE issues ADD COLUMN workflow_instance_id TEXT REFERENCES workflow_instances(id)");
+    migrate_alter(conn,"ALTER TABLE issues ADD COLUMN stage_id TEXT");
 
     // Teams & model selection
-    let _ = conn.execute("ALTER TABLE team_agent_slots ADD COLUMN model TEXT", []);
-    let _ = conn.execute("ALTER TABLE agent_sessions ADD COLUMN model TEXT", []);
+    migrate_alter(conn,"ALTER TABLE team_agent_slots ADD COLUMN model TEXT");
+    migrate_alter(conn,"ALTER TABLE agent_sessions ADD COLUMN model TEXT");
 
     // Team dispatch
-    let _ = conn.execute("ALTER TABLE issues ADD COLUMN role TEXT", []);
-    let _ = conn.execute("ALTER TABLE teams ADD COLUMN auto_pickup_types TEXT DEFAULT '[\"task\",\"bug\",\"feature\"]'", []);
-    let _ = conn.execute("ALTER TABLE teams ADD COLUMN is_active INTEGER DEFAULT 0", []);
+    migrate_alter(conn,"ALTER TABLE issues ADD COLUMN role TEXT");
+    migrate_alter(conn,"ALTER TABLE teams ADD COLUMN auto_pickup_types TEXT DEFAULT '[\"task\",\"bug\",\"feature\"]'");
+    migrate_alter(conn,"ALTER TABLE teams ADD COLUMN is_active INTEGER DEFAULT 0");
 
     // Intake agent columns
-    let _ = conn.execute("ALTER TABLE issues ADD COLUMN parent_id TEXT REFERENCES issues(id)", []);
-    let _ = conn.execute("ALTER TABLE issues ADD COLUMN needs_intake INTEGER DEFAULT 1", []);
-    let _ = conn.execute("ALTER TABLE issues ADD COLUMN scope_mode TEXT DEFAULT 'auto'", []);
+    migrate_alter(conn,"ALTER TABLE issues ADD COLUMN parent_id TEXT REFERENCES issues(id)");
+    migrate_alter(conn,"ALTER TABLE issues ADD COLUMN needs_intake INTEGER DEFAULT 1");
+    migrate_alter(conn,"ALTER TABLE issues ADD COLUMN scope_mode TEXT DEFAULT 'auto'");
 
     // Indexes for intake queries
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_issues_parent ON issues(parent_id)", []);
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_issues_needs_intake ON issues(needs_intake)", []);
+    migrate_alter(conn,"CREATE INDEX IF NOT EXISTS idx_issues_parent ON issues(parent_id)");
+    migrate_alter(conn,"CREATE INDEX IF NOT EXISTS idx_issues_needs_intake ON issues(needs_intake)");
 
     // Team coordination: is_lead flag for hierarchical mode
-    let _ = conn.execute("ALTER TABLE team_agent_slots ADD COLUMN is_lead INTEGER NOT NULL DEFAULT 0", []);
+    migrate_alter(conn,"ALTER TABLE team_agent_slots ADD COLUMN is_lead INTEGER NOT NULL DEFAULT 0");
 
     // Retry tracking for issues
-    let _ = conn.execute("ALTER TABLE issues ADD COLUMN retry_count INTEGER DEFAULT 0", []);
+    migrate_alter(conn,"ALTER TABLE issues ADD COLUMN retry_count INTEGER DEFAULT 0");
 
     // Attachments table
     conn.execute_batch("
@@ -277,7 +289,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     ")?;
 
     // Add app_url to projects
-    let _ = conn.execute("ALTER TABLE projects ADD COLUMN app_url TEXT", []);
+    migrate_alter(conn,"ALTER TABLE projects ADD COLUMN app_url TEXT");
 
     // ── Prompt Template Library ─────────────────────────────────────
     conn.execute_batch("
@@ -369,10 +381,10 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     ")?;
 
     // Add tier_floor / tier_ceiling to projects and teams
-    let _ = conn.execute("ALTER TABLE projects ADD COLUMN tier_floor INTEGER NOT NULL DEFAULT 1", []);
-    let _ = conn.execute("ALTER TABLE projects ADD COLUMN tier_ceiling INTEGER NOT NULL DEFAULT 5", []);
-    let _ = conn.execute("ALTER TABLE teams ADD COLUMN tier_floor INTEGER", []);
-    let _ = conn.execute("ALTER TABLE teams ADD COLUMN tier_ceiling INTEGER", []);
+    migrate_alter(conn,"ALTER TABLE projects ADD COLUMN tier_floor INTEGER NOT NULL DEFAULT 1");
+    migrate_alter(conn,"ALTER TABLE projects ADD COLUMN tier_ceiling INTEGER NOT NULL DEFAULT 5");
+    migrate_alter(conn,"ALTER TABLE teams ADD COLUMN tier_floor INTEGER");
+    migrate_alter(conn,"ALTER TABLE teams ADD COLUMN tier_ceiling INTEGER");
 
     // ── Model Performance Log (v2 Phase 2.2) ─────────────────────────
     conn.execute_batch("
@@ -416,8 +428,8 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     // ── Phase 2.4: Coordination-mode-dependent skills ─────────────────
     // Add is_system flag and coordination_mode to prompt_templates
-    let _ = conn.execute("ALTER TABLE prompt_templates ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE prompt_templates ADD COLUMN coordination_mode TEXT", []);
+    migrate_alter(conn,"ALTER TABLE prompt_templates ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0");
+    migrate_alter(conn,"ALTER TABLE prompt_templates ADD COLUMN coordination_mode TEXT");
 
     // Seed system skill templates for each coordination mode
     conn.execute_batch("
@@ -559,18 +571,18 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     // ── Phase 4.3: Context Window Management ───────────────────────────
     // Add context window limits to quality_tiers
-    let _ = conn.execute("ALTER TABLE quality_tiers ADD COLUMN max_context_tokens INTEGER NOT NULL DEFAULT 200000", []);
-    let _ = conn.execute("ALTER TABLE quality_tiers ADD COLUMN max_output_tokens INTEGER NOT NULL DEFAULT 8192", []);
+    migrate_alter(conn,"ALTER TABLE quality_tiers ADD COLUMN max_context_tokens INTEGER NOT NULL DEFAULT 200000");
+    migrate_alter(conn,"ALTER TABLE quality_tiers ADD COLUMN max_output_tokens INTEGER NOT NULL DEFAULT 8192");
 
     // Update with realistic limits per tier
-    let _ = conn.execute("UPDATE quality_tiers SET max_context_tokens = 8192, max_output_tokens = 2048 WHERE tier = 1", []);
-    let _ = conn.execute("UPDATE quality_tiers SET max_context_tokens = 32000, max_output_tokens = 4096 WHERE tier = 2", []);
-    let _ = conn.execute("UPDATE quality_tiers SET max_context_tokens = 200000, max_output_tokens = 8192 WHERE tier = 3", []);
-    let _ = conn.execute("UPDATE quality_tiers SET max_context_tokens = 200000, max_output_tokens = 16384 WHERE tier = 4", []);
-    let _ = conn.execute("UPDATE quality_tiers SET max_context_tokens = 200000, max_output_tokens = 32000 WHERE tier = 5", []);
+    migrate_alter(conn,"UPDATE quality_tiers SET max_context_tokens = 8192, max_output_tokens = 2048 WHERE tier = 1");
+    migrate_alter(conn,"UPDATE quality_tiers SET max_context_tokens = 32000, max_output_tokens = 4096 WHERE tier = 2");
+    migrate_alter(conn,"UPDATE quality_tiers SET max_context_tokens = 200000, max_output_tokens = 8192 WHERE tier = 3");
+    migrate_alter(conn,"UPDATE quality_tiers SET max_context_tokens = 200000, max_output_tokens = 16384 WHERE tier = 4");
+    migrate_alter(conn,"UPDATE quality_tiers SET max_context_tokens = 200000, max_output_tokens = 32000 WHERE tier = 5");
 
     // ── Phase 4.4: Cross-Project Learning ──────────────────────────────
-    let _ = conn.execute("ALTER TABLE projects ADD COLUMN share_learning INTEGER NOT NULL DEFAULT 0", []);
+    migrate_alter(conn,"ALTER TABLE projects ADD COLUMN share_learning INTEGER NOT NULL DEFAULT 0");
 
     Ok(())
 }

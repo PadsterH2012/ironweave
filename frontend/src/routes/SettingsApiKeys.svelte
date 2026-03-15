@@ -6,6 +6,7 @@
   let error: string | null = $state(null);
   let showForm: boolean = $state(false);
   let saving: boolean = $state(false);
+  let loading: boolean = $state(true);
 
   let newKeyName: string = $state('');
   let newKeyValue: string = $state('');
@@ -17,6 +18,8 @@
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to fetch API keys';
+    } finally {
+      loading = false;
     }
   }
 
@@ -109,7 +112,9 @@
       </div>
     {/if}
 
-    {#if apiKeys.length === 0 && !showForm}
+    {#if loading}
+      <div class="rounded-xl bg-gray-900 border border-gray-800 p-8 text-center text-gray-500">Loading API keys...</div>
+    {:else if apiKeys.length === 0 && !showForm}
       <div class="rounded-xl bg-gray-900 border border-gray-800 p-8 text-center text-gray-500">
         No API keys stored yet.
       </div>

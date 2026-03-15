@@ -48,6 +48,7 @@
   let teamList: Team[] = $state([]);
   let workflowDefs: WorkflowDefinition[] = $state([]);
   let error: string | null = $state(null);
+  let notFound: boolean = $state(false);
   let activeTab: string = $state('teams');
   let loomEntries: LoomEntry[] = $state([]);
 
@@ -118,7 +119,12 @@
         await fetchMountState(project.mount_id);
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to fetch project';
+      const msg = e instanceof Error ? e.message : 'Failed to fetch project';
+      if (msg.includes('404') || msg.includes('Not Found')) {
+        notFound = true;
+      } else {
+        error = msg;
+      }
     }
   }
 
@@ -524,7 +530,15 @@
     &larr; Back to Projects
   </button>
 
-  {#if error}
+  {#if notFound}
+    <div class="rounded-xl bg-gray-900 border border-gray-800 p-12 text-center space-y-3">
+      <p class="text-lg font-semibold text-gray-300">Project not found</p>
+      <p class="text-sm text-gray-500">This project may have been deleted.</p>
+      <button onclick={() => push('/projects')} class="mt-2 px-4 py-2 text-sm rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition-colors">
+        View all projects
+      </button>
+    </div>
+  {:else if error}
     <div class="rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-red-300 text-sm">
       {error}
     </div>

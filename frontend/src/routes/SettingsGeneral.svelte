@@ -6,6 +6,7 @@
   let error: string | null = $state(null);
   let success: string | null = $state(null);
   let saving: boolean = $state(false);
+  let loading: boolean = $state(true);
 
   let browseRoots: string = $state('');
   let mountBase: string = $state('');
@@ -25,6 +26,8 @@
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to fetch settings';
+    } finally {
+      loading = false;
     }
   }
 
@@ -66,6 +69,9 @@
       <div class="rounded-lg bg-green-900/40 border border-green-700 px-4 py-3 text-green-300 text-sm">{success}</div>
     {/if}
 
+    {#if loading}
+      <div class="rounded-xl bg-gray-900 border border-gray-800 p-8 text-center text-gray-500">Loading settings...</div>
+    {:else}
     <div class="rounded-xl bg-gray-900 border border-gray-800 p-5 space-y-4">
       <div>
         <label for="browse-roots" class="block text-sm font-medium text-gray-400 mb-1">Browse Roots</label>
@@ -113,5 +119,6 @@
         </button>
       </div>
     </div>
+    {/if}
   </div>
 </SettingsLayout>
