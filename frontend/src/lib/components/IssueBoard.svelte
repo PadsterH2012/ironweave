@@ -207,7 +207,9 @@
   }
 
   function priorityDots(priority: number): string {
-    return '\u25CF'.repeat(priority) + '\u25CB'.repeat(5 - priority);
+    const clamped = Math.max(0, Math.min(priority, 10));
+    const max = 10;
+    return '\u25CF'.repeat(clamped) + '\u25CB'.repeat(max - clamped);
   }
 </script>
 
