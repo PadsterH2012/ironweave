@@ -21,6 +21,7 @@
     RUNTIME_MODELS,
     PREDEFINED_ROLES,
     sync,
+    type LoomEntry,
   } from '../lib/api';
   import IssueBoard from '../lib/components/IssueBoard.svelte';
   import IntakeChat from '../lib/components/IntakeChat.svelte';
@@ -38,7 +39,6 @@
   import CoordinatorPanel from '../lib/components/CoordinatorPanel.svelte';
   import RoutingSuggestions from '../lib/components/RoutingSuggestions.svelte';
   import TeamRoleOverrides from '../lib/components/TeamRoleOverrides.svelte';
-  import { loom, type LoomEntry } from '../lib/api';
 
   interface Props {
     params: { id: string };
