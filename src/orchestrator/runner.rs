@@ -873,15 +873,25 @@ impl OrchestratorRunner {
                     let conn = self.db.lock().unwrap();
                     if let Ok(session) = AgentSession::get_by_id(&conn, &ta.agent_session_id) {
                         if let (Some(branch), Some(_wt_path)) = (&session.branch, &session.worktree_path) {
-                            let merge_id = uuid::Uuid::new_v4().to_string();
                             let project_id_for_merge = Team::get_by_id(&conn, &ta.team_id)
                                 .map(|t| t.project_id)
                                 .unwrap_or_default();
-                            let _ = conn.execute(
-                                "INSERT INTO merge_queue (id, project_id, branch_name, agent_session_id, issue_id, team_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                                rusqlite::params![merge_id, project_id_for_merge, branch, ta.agent_session_id, ta.issue_id, ta.team_id],
-                            );
-                            tracing::info!(branch = %branch, "Enqueued branch for merge");
+                            // Check if this branch already has a non-terminal entry (pending/merging/verifying/reviewing/resolving)
+                            let already_queued: bool = conn.query_row(
+                                "SELECT COUNT(*) FROM merge_queue WHERE branch_name = ?1 AND project_id = ?2 AND status IN ('pending', 'merging', 'verifying', 'reviewing', 'resolving')",
+                                rusqlite::params![branch, project_id_for_merge],
+                                |row| row.get::<_, i64>(0),
+                            ).unwrap_or(0) > 0;
+                            if already_queued {
+                                tracing::info!(branch = %branch, "Branch already in merge queue, skipping duplicate enqueue");
+                            } else {
+                                let merge_id = uuid::Uuid::new_v4().to_string();
+                                let _ = conn.execute(
+                                    "INSERT INTO merge_queue (id, project_id, branch_name, agent_session_id, issue_id, team_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                                    rusqlite::params![merge_id, project_id_for_merge, branch, ta.agent_session_id, ta.issue_id, ta.team_id],
+                                );
+                                tracing::info!(branch = %branch, "Enqueued branch for merge");
+                            }
                         }
                     }
                 }
