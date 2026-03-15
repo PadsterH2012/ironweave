@@ -20,7 +20,8 @@
 
   async function fetchQueue() {
     try {
-      entries = await mergeQueue.list(projectId);
+      const fetched = await mergeQueue.list(projectId);
+      entries = fetched.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to fetch merge queue';
