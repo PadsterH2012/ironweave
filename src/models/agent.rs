@@ -207,12 +207,10 @@ fn pid_is_alive(pid: i64) -> bool {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        // Portable fallback: attempt to send signal 0 via kill(2) via sysinfo.
-        use sysinfo::{System, RefreshKind, ProcessRefreshKind};
-        let mut sys = System::new_with_specifics(
-            RefreshKind::new().with_processes(ProcessRefreshKind::new()),
-        );
-        sys.refresh_processes(ProcessRefreshKind::new());
+        // Portable fallback: check if process exists via sysinfo.
+        use sysinfo::System;
+        let mut sys = System::new_all();
+        sys.refresh_all();
         sys.process(sysinfo::Pid::from(pid as usize)).is_some()
     }
 }
