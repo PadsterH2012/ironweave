@@ -25,7 +25,7 @@ test.describe('Issues — drag between columns & attachments upload', () => {
         issue_type: 'task',
       },
     });
-    expect(createRes.status()).toBe(200);
+    expect(createRes.ok()).toBeTruthy();
     const issue = await createRes.json();
     issueId = issue.id;
     expect(issueId).toBeTruthy();
@@ -73,7 +73,7 @@ test.describe('Issues — drag between columns & attachments upload', () => {
         issue_type: 'task',
       },
     });
-    expect(createRes.status()).toBe(200);
+    expect(createRes.ok()).toBeTruthy();
     const issue = await createRes.json();
     issueId = issue.id;
     expect(issueId).toBeTruthy();

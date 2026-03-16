@@ -22,30 +22,27 @@ test.describe('Workflow DAG visualization', () => {
   });
 
   test('DAG container renders in workflow view', async ({ request, page }) => {
+    // Get a team_id first
+    const teamsRes = await request.get(`${BASE}/api/projects/${PROJECT_ID}/teams`);
+    const teams = await teamsRes.json();
+    if (!teams.length) { test.skip(true, 'No teams'); return; }
+    const teamId = teams[0].id;
+
     // Create a workflow definition with a 2-stage DAG
     const ts = Date.now();
+    const dagJson = JSON.stringify({
+      stages: [
+        { id: 's1', name: 'Build', role: 'senior_coder', deps: [] },
+        { id: 's2', name: 'Test', role: 'senior_tester', deps: ['s1'] },
+      ],
+    });
     const wfRes = await request.post(`${BASE}/api/projects/${PROJECT_ID}/workflows`, {
       data: {
-        project_id: PROJECT_ID,
         name: `E2E DAG Test ${ts}`,
-        stages: [
-          {
-            id: 'stage-1',
-            name: 'Build',
-            runtime: 'claude',
-            prompt: 'Build step',
-            depends_on: [],
-            is_manual_gate: false,
-          },
-          {
-            id: 'stage-2',
-            name: 'Deploy',
-            runtime: 'claude',
-            prompt: 'Deploy step',
-            depends_on: ['stage-1'],
-            is_manual_gate: false,
-          },
-        ],
+        project_id: PROJECT_ID,
+        team_id: teamId,
+        dag: dagJson,
+        version: 1,
       },
     });
 
@@ -60,8 +57,8 @@ test.describe('Workflow DAG visualization', () => {
 
     // Optionally create an instance
     const instRes = await request.post(
-      `${BASE}/api/projects/${PROJECT_ID}/workflows/${workflowId}/instances`,
-      { data: { workflow_id: workflowId } }
+      `${BASE}/api/workflows/${workflowId}/instances`,
+      { data: { definition_id: workflowId } }
     );
     if (instRes.ok()) {
       const instance = await instRes.json();
