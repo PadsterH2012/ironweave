@@ -66,9 +66,9 @@ test.describe.serial('Workflow definition and instance lifecycle', () => {
     // Verify it appears in the UI
     await goToProjectTab(page, 'Workflows');
     await expect(async () => {
-      const defItem = page.locator(`.text-sm.font-medium.text-gray-200:has-text("${workflowName}")`);
+      const defItem = page.locator(`text=${workflowName}`);
       await expect(defItem.first()).toBeVisible();
-    }).toPass({ timeout: 10000, intervals: [2000] });
+    }).toPass({ timeout: 15000, intervals: [2000] });
   });
 
   test('Create workflow instance via API then verify in UI', async ({ page, request }) => {

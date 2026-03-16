@@ -53,6 +53,7 @@ test.describe.serial('Routing tab interactions', () => {
     // Create override via API
     const res = await request.post(`${BASE}/api/projects/${PROJECT_ID}/routing-overrides`, {
       data: {
+        project_id: PROJECT_ID,
         role: 'Senior Coder',
         task_type: 'implementation',
         to_model: 'claude-sonnet-4-6',
