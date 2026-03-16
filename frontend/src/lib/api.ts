@@ -56,6 +56,9 @@ export interface Project {
   app_url: string | null;
   sync_state: string;
   created_at: string;
+  is_paused: boolean;
+  paused_at: string | null;
+  pause_reason: string | null;
 }
 
 export interface CreateProject {
@@ -1069,8 +1072,8 @@ export const dispatch = {
   pause: (reason?: string) => post<DispatchStatus>('/dispatch/pause', { reason }),
   resume: () => post<DispatchStatus>('/dispatch/resume', {}),
   projectStatus: (pid: string) => get<ProjectDispatchStatus>(`/projects/${pid}/dispatch/status`),
-  projectPause: (pid: string, reason?: string) => post<ProjectDispatchStatus>(`/projects/${pid}/dispatch/pause`, { reason }),
-  projectResume: (pid: string) => post<ProjectDispatchStatus>(`/projects/${pid}/dispatch/resume`, {}),
+  projectPause: (pid: string, reason?: string) => post<Project>(`/projects/${pid}/dispatch/pause`, { reason }),
+  projectResume: (pid: string) => post<Project>(`/projects/${pid}/dispatch/resume`, {}),
   schedules: {
     list: () => get<DispatchSchedule[]>('/dispatch/schedules'),
     create: (input: CreateDispatchSchedule) => post<DispatchSchedule>('/dispatch/schedules', input),

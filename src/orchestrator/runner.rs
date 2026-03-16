@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::str::FromStr;
+use chrono::Offset;
 use std::sync::Arc;
 
 use portable_pty::PtySize;
@@ -884,7 +885,7 @@ impl OrchestratorRunner {
                 }
             };
 
-            let _now_local = now_utc.with_timezone(&tz);
+            let now_local = now_utc.with_timezone(&tz);
 
             let cron_schedule = match cron::Schedule::from_str(&schedule.cron_expression) {
                 Ok(s) => s,
@@ -895,12 +896,15 @@ impl OrchestratorRunner {
             };
 
             // Check if cron matches within the last 60 seconds (sweep runs every 30s)
-            // The cron crate works with UTC DateTime, so convert window boundaries to UTC
-            let window_start = now_utc - chrono::Duration::seconds(60);
+            // Convert local time to UTC for the cron crate, which operates on UTC DateTime.
+            // We offset the window so the cron expression is evaluated in the schedule's timezone.
+            let offset_secs = now_local.offset().fix().local_minus_utc() as i64;
+            let adjusted_now = now_utc + chrono::Duration::seconds(offset_secs);
+            let window_start = adjusted_now - chrono::Duration::seconds(60);
             let has_match = cron_schedule
                 .after(&window_start)
                 .take(1)
-                .any(|t| t <= now_utc);
+                .any(|t| t <= adjusted_now);
 
             if !has_match {
                 continue;
@@ -928,6 +932,8 @@ impl OrchestratorRunner {
                     let _ = crate::models::setting::Setting::upsert(&conn, "global_dispatch_paused", &crate::models::setting::UpsertSetting {
                         value: "false".to_string(), category: Some("killswitch".to_string()),
                     });
+                    let _ = crate::models::setting::Setting::delete(&conn, "global_paused_at");
+                    let _ = crate::models::setting::Setting::delete(&conn, "global_pause_reason");
                 }
                 ("project", "pause") => {
                     if let Some(ref pid) = schedule.project_id {
