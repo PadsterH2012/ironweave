@@ -58,6 +58,8 @@ Last updated: 2026-03-16
   - [ ] Quality tab — `<QualitySlider />`
   - [ ] Routing tab — `<RoutingSuggestions />`
   - [ ] Coordinator tab — `<CoordinatorPanel />`
+  - [ ] Details tab — `<ProjectDetailsPanel />`
+  - [ ] Features tab — `<FeaturePanel />`
   - [ ] Knowledge tab — `<KnowledgePanel />`
   - [ ] Tests tab — `<TestRunPanel />`
   - [ ] App Preview — start/stop/status
@@ -188,6 +190,25 @@ Last updated: 2026-03-16
 - [ ] Wake/sleep actions
 - [ ] Session ID tracking
 
+### FeaturePanel.svelte
+- [ ] Feature list with status badges and task progress bars
+- [ ] Status filter tabs (All/Ideas/Designed/In Progress/Implemented/Verified/Parked)
+- [ ] Add Feature form (title, description, priority)
+- [ ] Import PRD modal (paste any text)
+- [ ] Expandable feature cards with task lists
+- [ ] Implement button on tasks (creates Ironweave issue)
+- [ ] Park/Verify/Abandon action buttons
+- [ ] Implementation notes editing
+- [ ] 30-second auto-refresh
+
+### ProjectDetailsPanel.svelte
+- [ ] Split layout: Intent (editable) | Reality (read-only)
+- [ ] Intent editor with save and version indicator
+- [ ] Removal detection warning on save
+- [ ] Reality viewer with Rescan button
+- [ ] Gap analysis section (missing red, undocumented amber)
+- [ ] Create Feature from gap items
+
 ### KnowledgePanel.svelte
 - [ ] Pattern list with type badges (solution/gotcha/preference/recipe)
 - [ ] Filter by type and role
@@ -284,6 +305,9 @@ Last updated: 2026-03-16
 - [ ] `dispatch` — status, pause, resume, projectStatus, projectPause, projectResume
 - [ ] `dispatch.schedules` — list, create, update, delete
 - [ ] `testRunner` — trigger, list, get, latest, stop
+- [ ] `features` — list, get, create, update, delete, park, verify, import, summary
+- [ ] `featureTasks` — list, create, update, delete, implement
+- [ ] `projectDocuments` — get, update, history, scan, gaps
 - [ ] `knowledge` — list, get, create, search, crossProject, update, delete, extract
 
 ### TypeScript Interfaces
@@ -323,6 +347,8 @@ Last updated: 2026-03-16
 - [ ] `TeamRoleOverride`
 - [ ] `PerformanceLogEntry`, `ModelStats`
 - [ ] `TestRun`
+- [ ] `Feature`, `CreateFeature`, `FeatureWithTasks`, `FeatureTask`, `FeatureSummary`
+- [ ] `ProjectDocument`, `GapAnalysis`
 - [ ] `KnowledgePattern`, `CreateKnowledgePattern`, `KnowledgeSearchResult`
 
 ### Constants

@@ -243,6 +243,29 @@ Last updated: 2026-03-16
 - [ ] `GET /api/projects/{pid}/chokepoints` — `workflow_traces::list_chokepoints`
 - [ ] `POST /api/projects/{pid}/chokepoints/detect` — `workflow_traces::detect_chokepoints`
 
+### Features (src/api/features.rs)
+- [ ] `GET /api/projects/{pid}/features` — `features::list_features`
+- [ ] `POST /api/projects/{pid}/features` — `features::create_feature`
+- [ ] `POST /api/projects/{pid}/features/import` — `features::import_prd`
+- [ ] `GET /api/projects/{pid}/features/{id}` — `features::get_feature`
+- [ ] `PUT /api/projects/{pid}/features/{id}` — `features::update_feature`
+- [ ] `DELETE /api/projects/{pid}/features/{id}` — `features::delete_feature`
+- [ ] `POST /api/projects/{pid}/features/{id}/park` — `features::park_feature`
+- [ ] `POST /api/projects/{pid}/features/{id}/verify` — `features::verify_feature`
+- [ ] `GET /api/features/summary` — `features::feature_summary`
+- [ ] `GET /api/features/{fid}/tasks` — `features::list_tasks`
+- [ ] `POST /api/features/{fid}/tasks` — `features::create_task`
+- [ ] `PUT /api/features/{fid}/tasks/{id}` — `features::update_task`
+- [ ] `DELETE /api/features/{fid}/tasks/{id}` — `features::delete_task`
+- [ ] `POST /api/features/{fid}/tasks/{id}/implement` — `features::implement_task`
+
+### Project Documents (src/api/project_documents.rs)
+- [ ] `GET /api/projects/{pid}/documents/{type}` — `project_documents::get_document`
+- [ ] `PUT /api/projects/{pid}/documents/{type}` — `project_documents::update_document`
+- [ ] `GET /api/projects/{pid}/documents/{type}/history` — `project_documents::get_history`
+- [ ] `POST /api/projects/{pid}/documents/scan` — `project_documents::trigger_scan`
+- [ ] `GET /api/projects/{pid}/documents/gaps` — `project_documents::get_gaps`
+
 ### Knowledge Graph (src/api/knowledge.rs)
 - [ ] `GET /api/projects/{pid}/knowledge` — `knowledge::list_patterns`
 - [ ] `GET /api/projects/{pid}/knowledge/{id}` — `knowledge::get_pattern`
@@ -290,7 +313,10 @@ Last updated: 2026-03-16
 - [ ] `cost_tracking.rs` — CostRecord, CostAggregate (token/cost tracking)
 - [ ] `dispatch_schedule.rs` — DispatchSchedule (cron-based killswitch schedules)
 - [ ] `issue.rs` — Issue, CreateIssue, UpdateIssue (task/issue management)
+- [ ] `feature.rs` — Feature, FeatureSummary (lifecycle tracking)
+- [ ] `feature_task.rs` — FeatureTask (task breakdown with implement-to-issue)
 - [ ] `knowledge_pattern.rs` — KnowledgePattern, hybrid search, keyword extraction
+- [ ] `project_document.rs` — ProjectDocument (versioned intent/reality documents)
 - [ ] `loom.rs` — LoomEntry (agent activity narrative log)
 - [ ] `merge_queue.rs` — MergeQueueEntry (branch merge management)
 - [ ] `merge_queue_entry.rs` — MergeQueueEntry (alternate/extended)
