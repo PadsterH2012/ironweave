@@ -988,6 +988,7 @@ export interface PerformanceLogEntry {
 export interface ModelStats {
   model: string;
   role: string;
+  runtime: string;
   total: number;
   successes: number;
   failures: number;

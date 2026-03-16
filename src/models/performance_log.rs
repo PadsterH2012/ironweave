@@ -60,6 +60,7 @@ pub struct PerformanceQuery {
 pub struct ModelStats {
     pub model: String,
     pub role: String,
+    pub runtime: String,
     pub total: i64,
     pub successes: i64,
     pub failures: i64,
@@ -181,7 +182,7 @@ impl PerformanceLogEntry {
     pub fn model_stats(conn: &Connection, project_id: &str, days: i64) -> Result<Vec<ModelStats>> {
         let offset = format!("-{} days", days);
         let mut stmt = conn.prepare(
-            "SELECT model, role,
+            "SELECT model, role, runtime,
                     COUNT(*) as total,
                     SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) as successes,
                     SUM(CASE WHEN outcome = 'failure' THEN 1 ELSE 0 END) as failures,
@@ -190,7 +191,7 @@ impl PerformanceLogEntry {
                     AVG(duration_seconds) as avg_duration
              FROM model_performance_log
              WHERE project_id = ?1 AND created_at >= datetime('now', ?2)
-             GROUP BY model, role
+             GROUP BY model, role, runtime
              ORDER BY total DESC"
         )?;
         let rows = stmt.query_map(params![project_id, offset], |row| {
@@ -199,6 +200,7 @@ impl PerformanceLogEntry {
             Ok(ModelStats {
                 model: row.get("model")?,
                 role: row.get("role")?,
+                runtime: row.get("runtime")?,
                 total,
                 successes,
                 failures: row.get("failures")?,
