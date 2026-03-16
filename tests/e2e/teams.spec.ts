@@ -22,7 +22,7 @@ test.describe('Teams tab', () => {
   test('Create Team button exists', async ({ page }) => {
     await goToProjectTab(page, 'Teams');
 
-    const createButton = page.locator('button', { hasText: /create team/i });
+    const createButton = page.locator('button', { hasText: /new team/i });
     await expect(createButton.first()).toBeVisible({ timeout: 10000 });
   });
 });

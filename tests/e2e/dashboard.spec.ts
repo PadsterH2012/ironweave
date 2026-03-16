@@ -6,7 +6,7 @@ test.describe('Dashboard', () => {
 
     const expectedLabels = ['Active Agents', 'In Progress', 'Open Issues', 'Closed'];
     for (const label of expectedLabels) {
-      await expect(page.locator(`text=${label}`)).toBeVisible({ timeout: 10000 });
+      await expect(page.locator(`text=${label}`).first()).toBeVisible({ timeout: 10000 });
     }
   });
 
