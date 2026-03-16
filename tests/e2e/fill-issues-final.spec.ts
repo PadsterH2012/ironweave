@@ -30,9 +30,13 @@ test.describe('Issues — drag between columns & attachments upload', () => {
     issueId = issue.id;
     expect(issueId).toBeTruthy();
 
-    // Navigate to the Ironweave project Issues tab
-    await page.goto(`${BASE}/#/projects/${PROJECT_ID}/issues`);
-    await page.waitForLoadState('networkidle');
+    // Navigate to the Ironweave project and click Issues tab
+    await page.goto(`/#/projects/${PROJECT_ID}`);
+    await page.waitForURL(/\/#\/projects\/.+/, { timeout: 10000 });
+    const issuesTab = page.locator('button', { hasText: /^Issues$/ });
+    await expect(issuesTab).toBeVisible({ timeout: 10000 });
+    await issuesTab.click();
+    await page.waitForTimeout(2000);
 
     // Find the issue on the board
     const issueCard = page.locator(`text=E2E Status Test ${ts}`).first();
