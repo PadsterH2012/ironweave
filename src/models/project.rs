@@ -19,6 +19,9 @@ pub struct Project {
     pub sync_state: String,
     pub created_at: String,
     pub app_url: Option<String>,
+    pub is_paused: bool,
+    pub paused_at: Option<String>,
+    pub pause_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +65,9 @@ impl Project {
             sync_state: row.get::<_, Option<String>>("sync_state")?.unwrap_or_else(|| "idle".to_string()),
             created_at: row.get("created_at")?,
             app_url: row.get("app_url")?,
+            is_paused: row.get::<_, i64>("is_paused").unwrap_or(0) != 0,
+            paused_at: row.get("paused_at")?,
+            pause_reason: row.get("pause_reason")?,
         })
     }
 
@@ -150,6 +156,22 @@ impl Project {
             params![state, sync_path, last_synced_at, id],
         )?;
         Ok(())
+    }
+
+    pub fn pause(conn: &Connection, id: &str, reason: Option<&str>) -> Result<Self> {
+        conn.execute(
+            "UPDATE projects SET is_paused = 1, paused_at = datetime('now'), pause_reason = ?1 WHERE id = ?2",
+            params![reason, id],
+        )?;
+        Self::get_by_id(conn, id)
+    }
+
+    pub fn resume(conn: &Connection, id: &str) -> Result<Self> {
+        conn.execute(
+            "UPDATE projects SET is_paused = 0, paused_at = NULL, pause_reason = NULL WHERE id = ?1",
+            params![id],
+        )?;
+        Self::get_by_id(conn, id)
     }
 }
 
@@ -271,6 +293,32 @@ mod tests {
         assert_eq!(updated.directory, "/tmp/orig");
         assert_eq!(updated.description, Some("My project description".to_string()));
         assert_eq!(updated.git_remote, Some("https://github.com/test".to_string()));
+    }
+
+    #[test]
+    fn test_pause_and_resume() {
+        let conn = setup_db();
+        let input = CreateProject {
+            name: "PauseTest".to_string(),
+            directory: "/tmp/pause".to_string(),
+            context: "homelab".to_string(),
+            obsidian_vault_path: None,
+            obsidian_project: None,
+            git_remote: None,
+            mount_id: None,
+        };
+        let project = Project::create(&conn, &input).unwrap();
+        assert!(!project.is_paused);
+
+        let paused = Project::pause(&conn, &project.id, Some("going home")).unwrap();
+        assert!(paused.is_paused);
+        assert!(paused.paused_at.is_some());
+        assert_eq!(paused.pause_reason, Some("going home".to_string()));
+
+        let resumed = Project::resume(&conn, &project.id).unwrap();
+        assert!(!resumed.is_paused);
+        assert!(resumed.paused_at.is_none());
+        assert!(resumed.pause_reason.is_none());
     }
 
     #[test]
