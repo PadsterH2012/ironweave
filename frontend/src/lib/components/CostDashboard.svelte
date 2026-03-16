@@ -204,7 +204,7 @@
             {#each stats as s}
               <tr class="border-b border-gray-800/50 hover:bg-gray-800/30">
                 <td class="py-2 px-2 text-gray-300 font-mono">{s.model}</td>
-                <td class="py-2 px-2 text-gray-400">{s.runtime}</td>
+                <td class="py-2 px-2 text-gray-400">{s.runtime === 'opencode' ? (s.model.startsWith('ollama/') ? 'opencode (Ollama)' : 'opencode (OpenRouter)') : s.runtime}</td>
                 <td class="py-2 px-2 text-gray-400">{s.role}</td>
                 <td class="py-2 px-2 text-right text-gray-300">{s.total}</td>
                 <td class="py-2 px-2 text-right {s.success_rate >= 0.8 ? 'text-green-400' : s.success_rate >= 0.5 ? 'text-yellow-400' : 'text-red-400'}">
