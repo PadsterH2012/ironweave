@@ -68,8 +68,12 @@ test.describe.serial('Routing tab interactions', () => {
     const body = await res.json();
     createdOverrideId = body.id ?? null;
 
-    // Navigate to Routing tab and verify the override appears
-    await goToProjectTab(page, 'Routing');
+    // Navigate directly to the Ironweave project's Routing tab
+    await page.goto(`/#/projects/${PROJECT_ID}`);
+    await page.waitForURL(/\/#\/projects\/.+/, { timeout: 10000 });
+    const routingTab = page.locator('button', { hasText: /^Routing$/ });
+    await expect(routingTab).toBeVisible({ timeout: 10000 });
+    await routingTab.click();
 
     await expect(async () => {
       const role = page.locator('text=Senior Coder');

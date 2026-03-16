@@ -63,8 +63,12 @@ test.describe.serial('Workflow definition and instance lifecycle', () => {
     const created = await createRes.json();
     createdDefId = created.id;
 
-    // Verify it appears in the UI
-    await goToProjectTab(page, 'Workflows');
+    // Navigate directly to the Ironweave project's Workflows tab
+    await page.goto(`/#/projects/${PROJECT_ID}`);
+    await page.waitForURL(/\/#\/projects\/.+/, { timeout: 10000 });
+    const wfTab = page.locator('button', { hasText: /^Workflows$/ });
+    await expect(wfTab).toBeVisible({ timeout: 10000 });
+    await wfTab.click();
     await expect(async () => {
       const defItem = page.locator(`text=${workflowName}`);
       await expect(defItem.first()).toBeVisible();
