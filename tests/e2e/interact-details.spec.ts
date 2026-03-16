@@ -38,8 +38,8 @@ test.describe('Details tab – interaction tests', () => {
 
     // The gap analysis section may or may not appear depending on data.
     // Check that the page renders without errors (Intent and Reality are visible).
-    await expect(page.getByText('Intent')).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText('Reality')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('h3', { hasText: /^Intent$/ }).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('h3', { hasText: /^Reality$/ }).first()).toBeVisible({ timeout: 10000 });
 
     // If gaps exist, the Gap Analysis heading should be visible
     const gapsData = await gapsRes.json();

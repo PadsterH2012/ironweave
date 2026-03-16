@@ -114,7 +114,8 @@ test.describe('Features API contracts', () => {
     const implRes = await request.post(`${BASE}/api/features/${feature.id}/tasks/${createdTaskId}/implement`);
     expect(implRes.status()).toBeLessThan(300);
     const result = await implRes.json();
-    expect(result.issue_id).toBeTruthy();
+    expect(result.task.issue_id).toBeTruthy();
+    expect(result.issue.id).toBeTruthy();
 
     // Clean up
     await request.delete(`${BASE}/api/projects/${PROJECT_ID}/features/${feature.id}`);

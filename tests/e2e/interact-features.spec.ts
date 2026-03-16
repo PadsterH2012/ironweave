@@ -57,7 +57,8 @@ test.describe.serial('Feature interactions', () => {
     const res = await request.post(`${BASE}/api/features/${featureId}/tasks/${taskId}/implement`);
     expect(res.status()).toBeLessThan(300);
     const result = await res.json();
-    expect(result.issue_id).toBeTruthy();
+    expect(result.task.issue_id).toBeTruthy();
+    expect(result.issue.id).toBeTruthy();
   });
 
   test('park feature via API and verify status changes', async ({ page, request }) => {

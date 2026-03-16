@@ -25,7 +25,7 @@ test.describe('Details tab – smoke tests', () => {
   });
 
   test('Reality panel exists', async ({ page }) => {
-    await expect(page.getByText('Reality')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('h3', { hasText: /^Reality$/ }).first()).toBeVisible({ timeout: 10000 });
     // Either the reality content pre element or the empty state message
     const realityContent = page.locator('pre').first();
     const emptyState = page.getByText('No reality scan yet. Click Rescan to generate.');
