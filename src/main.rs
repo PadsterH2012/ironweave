@@ -63,6 +63,8 @@ async fn main() {
         if let Some(ref sec) = config.security {
             Setting::seed(&conn, "master_key", &sec.master_key, "general").unwrap_or(());
         }
+        // Seed killswitch defaults
+        Setting::seed(&conn, "global_dispatch_paused", "false", "killswitch").unwrap_or(());
     }
 
     // Seed team templates
@@ -281,7 +283,16 @@ async fn main() {
         // Cross-project learning
         .route("/api/cross-project/suggestions", get(api::cross_project::global_suggestions))
         .route("/api/cross-project/opted-in", get(api::cross_project::list_opted_in))
-        .route("/api/projects/{pid}/share-learning", post(api::cross_project::toggle_sharing));
+        .route("/api/projects/{pid}/share-learning", post(api::cross_project::toggle_sharing))
+        // Dispatch killswitch
+        .route("/api/dispatch/pause", post(api::dispatch::global_pause))
+        .route("/api/dispatch/resume", post(api::dispatch::global_resume))
+        .route("/api/dispatch/status", get(api::dispatch::global_status))
+        .route("/api/projects/{pid}/dispatch/pause", post(api::dispatch::project_pause))
+        .route("/api/projects/{pid}/dispatch/resume", post(api::dispatch::project_resume))
+        .route("/api/projects/{pid}/dispatch/status", get(api::dispatch::project_status))
+        .route("/api/dispatch/schedules", get(api::dispatch::list_schedules).post(api::dispatch::create_schedule))
+        .route("/api/dispatch/schedules/{id}", get(api::dispatch::get_schedule).put(api::dispatch::update_schedule).delete(api::dispatch::delete_schedule));
 
     // Only add auth middleware if auth is configured
     if auth_config.is_some() {

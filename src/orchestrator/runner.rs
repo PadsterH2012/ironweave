@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use portable_pty::PtySize;
@@ -559,9 +560,23 @@ impl OrchestratorRunner {
             tracing::error!("Intake sweep error: {}", e);
         }
 
-        // Team dispatch sweep
-        if let Err(e) = self.sweep_teams().await {
-            tracing::error!("Team sweep error: {}", e);
+        // Killswitch: evaluate cron schedules
+        self.evaluate_schedules();
+
+        // Killswitch: check global dispatch pause
+        let global_paused = {
+            let conn = self.db.lock().unwrap();
+            crate::models::setting::Setting::get_by_key(&conn, "global_dispatch_paused")
+                .map(|s| s.value == "true")
+                .unwrap_or(false)
+        };
+
+        if global_paused {
+            tracing::debug!("Global dispatch paused — skipping team dispatch");
+        } else {
+            if let Err(e) = self.sweep_teams().await {
+                tracing::error!("Team sweep error: {}", e);
+            }
         }
 
         // Parent auto-close sweep
@@ -843,6 +858,91 @@ impl OrchestratorRunner {
         run_state.state_machine.checkpoint(checkpoint)?;
 
         Ok(())
+    }
+
+    // ── evaluate_schedules (killswitch cron) ──────────────────────
+
+    /// Evaluate dispatch schedules and auto-pause/resume as needed.
+    fn evaluate_schedules(&self) {
+        let conn = self.db.lock().unwrap();
+        let schedules = match crate::models::dispatch_schedule::DispatchSchedule::list_enabled(&conn) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("Failed to load dispatch schedules: {}", e);
+                return;
+            }
+        };
+
+        let now_utc = chrono::Utc::now();
+
+        for schedule in &schedules {
+            let tz: chrono_tz::Tz = match schedule.timezone.parse() {
+                Ok(tz) => tz,
+                Err(_) => {
+                    tracing::warn!(schedule_id = %schedule.id, tz = %schedule.timezone, "Invalid timezone, skipping");
+                    continue;
+                }
+            };
+
+            let _now_local = now_utc.with_timezone(&tz);
+
+            let cron_schedule = match cron::Schedule::from_str(&schedule.cron_expression) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(schedule_id = %schedule.id, expr = %schedule.cron_expression, "Invalid cron: {}", e);
+                    continue;
+                }
+            };
+
+            // Check if cron matches within the last 60 seconds (sweep runs every 30s)
+            // The cron crate works with UTC DateTime, so convert window boundaries to UTC
+            let window_start = now_utc - chrono::Duration::seconds(60);
+            let has_match = cron_schedule
+                .after(&window_start)
+                .take(1)
+                .any(|t| t <= now_utc);
+
+            if !has_match {
+                continue;
+            }
+
+            tracing::info!(
+                schedule_id = %schedule.id, action = %schedule.action, scope = %schedule.scope,
+                "Dispatch schedule triggered"
+            );
+
+            match (schedule.scope.as_str(), schedule.action.as_str()) {
+                ("global", "pause") => {
+                    let _ = crate::models::setting::Setting::upsert(&conn, "global_dispatch_paused", &crate::models::setting::UpsertSetting {
+                        value: "true".to_string(), category: Some("killswitch".to_string()),
+                    });
+                    let _ = crate::models::setting::Setting::upsert(&conn, "global_paused_at", &crate::models::setting::UpsertSetting {
+                        value: chrono::Utc::now().to_rfc3339(), category: Some("killswitch".to_string()),
+                    });
+                    let _ = crate::models::setting::Setting::upsert(&conn, "global_pause_reason", &crate::models::setting::UpsertSetting {
+                        value: schedule.description.clone().unwrap_or_else(|| "Scheduled pause".to_string()),
+                        category: Some("killswitch".to_string()),
+                    });
+                }
+                ("global", "resume") => {
+                    let _ = crate::models::setting::Setting::upsert(&conn, "global_dispatch_paused", &crate::models::setting::UpsertSetting {
+                        value: "false".to_string(), category: Some("killswitch".to_string()),
+                    });
+                }
+                ("project", "pause") => {
+                    if let Some(ref pid) = schedule.project_id {
+                        let reason = schedule.description.as_deref().unwrap_or("Scheduled pause");
+                        let _ = crate::models::project::Project::pause(&conn, pid, Some(reason));
+                    }
+                }
+                ("project", "resume") => {
+                    if let Some(ref pid) = schedule.project_id {
+                        let _ = crate::models::project::Project::resume(&conn, pid);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     // ── sweep_teams (Task 8 – team dispatch) ──────────────────────
@@ -1182,6 +1282,17 @@ impl OrchestratorRunner {
         };
 
         for team in &active_teams {
+            // Killswitch: check project-level pause
+            {
+                let conn = self.db.lock().unwrap();
+                if let Ok(project) = crate::models::project::Project::get_by_id(&conn, &team.project_id) {
+                    if project.is_paused {
+                        tracing::debug!(project = %team.project_id, "Project paused — skipping team {}", team.id);
+                        continue;
+                    }
+                }
+            }
+
             // ── Budget enforcement (v2 Phase 1.2) ────────────────────────
             // Skip this team if it has exceeded its daily cost or token budget
             if team.cost_budget_daily.is_some() || team.token_budget.is_some() {

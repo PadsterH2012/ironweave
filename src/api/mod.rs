@@ -27,3 +27,4 @@ pub mod team_role_overrides;
 pub mod code_graph;
 pub mod workflow_traces;
 pub mod cross_project;
+pub mod dispatch;
