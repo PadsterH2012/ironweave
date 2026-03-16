@@ -629,6 +629,26 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
     }
 
+    // ── Killswitch: project-level pause ─────────────────────────────────
+    migrate_alter(conn, "ALTER TABLE projects ADD COLUMN is_paused INTEGER NOT NULL DEFAULT 0");
+    migrate_alter(conn, "ALTER TABLE projects ADD COLUMN paused_at TEXT");
+    migrate_alter(conn, "ALTER TABLE projects ADD COLUMN pause_reason TEXT");
+
+    // ── Killswitch: dispatch schedules table ────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS dispatch_schedules (
+            id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL CHECK(scope IN ('global', 'project')),
+            project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+            cron_expression TEXT NOT NULL,
+            action TEXT NOT NULL CHECK(action IN ('resume', 'pause')),
+            timezone TEXT NOT NULL DEFAULT 'Europe/London',
+            is_enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            description TEXT
+        );
+    ")?;
+
     Ok(())
 }
 
