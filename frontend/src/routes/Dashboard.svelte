@@ -5,6 +5,7 @@
     loom as loomApi,
     type AgentInfo,
     type DashboardStats,
+    type CurrentWorkItem,
     type ActivityLogEntry,
     type MetricsResponse,
     type SystemHealth,
@@ -81,9 +82,9 @@
 
   const statCards = $derived([
     { label: 'Active Agents', value: stats?.active_agents ?? 0, accent: 'text-purple-400' },
-    { label: 'Projects', value: stats?.project_count ?? 0, accent: 'text-blue-400' },
+    { label: 'In Progress', value: stats?.in_progress_issues ?? 0, accent: 'text-blue-400' },
     { label: 'Open Issues', value: stats?.open_issues ?? 0, accent: 'text-yellow-400' },
-    { label: 'Running Workflows', value: stats?.running_workflows ?? 0, accent: 'text-green-400' },
+    { label: 'Closed', value: stats?.closed_issues ?? 0, accent: 'text-green-400' },
   ]);
 
   function setDays(d: number) {
@@ -116,6 +117,43 @@
       </div>
     {/each}
   </div>
+
+  <!-- Current Work -->
+  {#if stats && stats.current_work.length > 0}
+    <div class="rounded-xl bg-gray-900 border border-gray-800 p-5">
+      <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">Current Work</h3>
+      <div class="space-y-2">
+        {#each stats.current_work as item}
+          <div class="flex items-center gap-3 rounded-lg bg-gray-800/40 border border-gray-800/60 px-4 py-3">
+            <!-- Status indicator -->
+            <span class="flex-shrink-0 w-2 h-2 rounded-full {item.agent_state === 'working' ? 'bg-blue-400 animate-pulse' : item.agent_state === 'running' ? 'bg-green-400 animate-pulse' : item.status === 'in_progress' ? 'bg-yellow-400' : 'bg-gray-500'}"></span>
+            <!-- Issue details -->
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-sm text-gray-200 truncate">{item.title}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-700 text-gray-400 flex-shrink-0">{item.status}</span>
+              </div>
+              <div class="flex items-center gap-2 mt-0.5">
+                <span class="text-[10px] text-gray-500">{item.role}</span>
+                <span class="text-[10px] text-gray-600">{item.project_name}</span>
+                {#if item.agent_runtime}
+                  <span class="text-[10px] px-1.5 py-0.5 rounded-full {item.agent_runtime === 'claude' ? 'bg-purple-900/50 text-purple-300' : item.agent_runtime === 'gemini' ? 'bg-green-900/50 text-green-300' : 'bg-blue-900/50 text-blue-300'}">{item.agent_runtime}</span>
+                {/if}
+              </div>
+            </div>
+            <!-- Time -->
+            {#if item.updated_at}
+              <span class="text-[10px] text-gray-600 flex-shrink-0">{timeAgo(item.updated_at)}</span>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    </div>
+  {:else if stats && stats.in_progress_issues === 0}
+    <div class="rounded-xl bg-gray-900 border border-gray-800 p-5 text-center text-gray-500 text-sm">
+      No tasks currently being processed.
+    </div>
+  {/if}
 
   <!-- Activity Feed + Metrics Charts -->
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">

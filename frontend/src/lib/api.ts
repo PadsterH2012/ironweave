@@ -297,11 +297,25 @@ export interface CreateInstance {
   current_stage?: string;
 }
 
+export interface CurrentWorkItem {
+  issue_id: string;
+  title: string;
+  role: string;
+  status: string;
+  project_name: string;
+  agent_runtime: string | null;
+  agent_state: string | null;
+  updated_at: string | null;
+}
+
 export interface DashboardStats {
   project_count: number;
   active_agents: number;
   open_issues: number;
+  in_progress_issues: number;
+  closed_issues: number;
   running_workflows: number;
+  current_work: CurrentWorkItem[];
 }
 
 export interface ActivityLogEntry {

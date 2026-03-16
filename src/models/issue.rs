@@ -54,6 +54,7 @@ pub struct UpdateIssue {
     pub role: Option<String>,
     pub needs_intake: Option<i64>,
     pub scope_mode: Option<String>,
+    pub depends_on: Option<Vec<String>>,
 }
 
 impl Issue {
@@ -346,6 +347,11 @@ impl Issue {
         if let Some(ref scope_mode) = input.scope_mode {
             sets.push("scope_mode = ?");
             values.push(Box::new(scope_mode.clone()));
+        }
+        if let Some(ref depends_on) = input.depends_on {
+            let deps_json = serde_json::to_string(depends_on)?;
+            sets.push("depends_on = ?");
+            values.push(Box::new(deps_json));
         }
 
         if sets.is_empty() {

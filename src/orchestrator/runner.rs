@@ -1219,6 +1219,12 @@ impl OrchestratorRunner {
             }
             let pickup_refs: Vec<&str> = pickup_types.iter().map(|s| s.as_str()).collect();
 
+            tracing::debug!(
+                team_id = %team.id, team_name = %team.name, mode = %team.coordination_mode,
+                slots = slots.len(), pickup_types = ?pickup_refs,
+                "Dispatching for team"
+            );
+
             match team.coordination_mode.as_str() {
                 "pipeline" => {
                     self.dispatch_pipeline(team, &slots, &pickup_refs).await?;
@@ -1280,8 +1286,8 @@ impl OrchestratorRunner {
     }
 
     /// Pipeline dispatch: issues are worked sequentially by slot_order.
-    /// Only dispatch agents for the current pipeline stage (lowest slot_order
-    /// whose role still has open/in_progress issues).
+    /// Find the lowest slot_order that has ANY role with open/in_progress issues,
+    /// then dispatch agents for ALL roles at that stage independently.
     async fn dispatch_pipeline(
         &mut self,
         team: &Team,
@@ -1289,35 +1295,54 @@ impl OrchestratorRunner {
         pickup_refs: &[&str],
     ) -> crate::error::Result<()> {
         // Slots are already sorted by slot_order from list_by_team.
-        // Find the current pipeline stage: the lowest slot_order whose role
-        // still has open or in_progress issues.
-        let mut current_stage_slot_order: Option<i64> = None;
-        let mut current_stage_role: Option<String> = None;
+        // Group slots by slot_order, find the lowest order with work.
+        let mut current_stage_order: Option<i64> = None;
 
+        // Collect unique slot_orders in ascending order
+        let mut seen_orders = std::collections::BTreeSet::new();
         for slot in slots {
-            let has_open = {
+            seen_orders.insert(slot.slot_order);
+        }
+
+        for &order in &seen_orders {
+            // Check if ANY role at this order has open issues
+            let order_slots: Vec<&TeamAgentSlot> = slots.iter()
+                .filter(|s| s.slot_order == order)
+                .collect();
+
+            let has_work = {
                 let conn = self.db.lock().unwrap();
-                let count: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM issues WHERE project_id = ?1 \
-                     AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
-                     AND status IN ('open', 'in_progress') AND needs_intake = 0",
-                    rusqlite::params![team.project_id, slot.role],
-                    |row| row.get(0),
-                ).unwrap_or(0);
-                count > 0
+                let mut found = false;
+                // Check each unique role at this order
+                let mut checked_roles = std::collections::HashSet::new();
+                for slot in &order_slots {
+                    if !checked_roles.insert(slot.role.to_lowercase()) {
+                        continue;
+                    }
+                    let count: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM issues WHERE project_id = ?1 \
+                         AND REPLACE(LOWER(role), '_', ' ') = REPLACE(LOWER(?2), '_', ' ') \
+                         AND status IN ('open', 'in_progress') AND needs_intake = 0",
+                        rusqlite::params![team.project_id, slot.role],
+                        |row| row.get(0),
+                    ).unwrap_or(0);
+                    if count > 0 {
+                        found = true;
+                        break;
+                    }
+                }
+                found
             };
 
-            if has_open {
-                current_stage_slot_order = Some(slot.slot_order);
-                current_stage_role = Some(slot.role.clone());
+            if has_work {
+                current_stage_order = Some(order);
                 break;
             }
         }
 
-        // If no stage has work, nothing to dispatch
-        let (stage_order, stage_role) = match (current_stage_slot_order, current_stage_role) {
-            (Some(o), Some(r)) => (o, r),
-            _ => return Ok(()),
+        let stage_order = match current_stage_order {
+            Some(o) => o,
+            None => return Ok(()),
         };
 
         // Collect all slots at the current stage order
@@ -1325,27 +1350,48 @@ impl OrchestratorRunner {
             .filter(|s| s.slot_order == stage_order)
             .collect();
 
-        let running_count = self.team_agents.values()
-            .filter(|ta| ta.team_id == team.id && ta.role == stage_role)
-            .count();
-        let max_for_stage = stage_slots.len();
-        if running_count >= max_for_stage {
-            return Ok(());
+        // Group stage slots by normalised role name and dispatch each role independently
+        let mut role_slots: std::collections::HashMap<String, Vec<&TeamAgentSlot>> = std::collections::HashMap::new();
+        for slot in &stage_slots {
+            let normalised = slot.role.to_lowercase().replace('_', " ");
+            role_slots.entry(normalised).or_default().push(slot);
         }
 
-        let ready_issues = {
-            let conn = self.db.lock().unwrap();
-            Issue::get_ready_by_role(&conn, &team.project_id, &stage_role, pickup_refs)?
-        };
+        for (normalised_role, slots_for_role) in &role_slots {
+            // Count running agents for this role
+            let running_count = self.team_agents.values()
+                .filter(|ta| {
+                    ta.team_id == team.id
+                        && ta.role.to_lowercase().replace('_', " ") == *normalised_role
+                })
+                .count();
+            let max_for_role = slots_for_role.len();
+            if running_count >= max_for_role {
+                continue;
+            }
 
-        let slots_available = max_for_stage - running_count;
-        let to_spawn = std::cmp::min(slots_available, ready_issues.len());
-        for i in 0..to_spawn {
-            let issue = &ready_issues[i];
-            let slot = stage_slots[i % stage_slots.len()];
-            if let Err(e) = self.spawn_team_agent(team, slot, issue).await {
-                tracing::error!(team = %team.id, role = %stage_role, issue = %issue.id,
-                    "Failed to spawn pipeline agent: {}", e);
+            // Use the original role name from the first slot for issue lookup
+            let role_name = &slots_for_role[0].role;
+            let ready_issues = {
+                let conn = self.db.lock().unwrap();
+                Issue::get_ready_by_role(&conn, &team.project_id, role_name, pickup_refs)?
+            };
+
+            let slots_available = max_for_role - running_count;
+            let to_spawn = std::cmp::min(slots_available, ready_issues.len());
+            tracing::debug!(
+                team = %team.id, role = %role_name, stage_order = stage_order,
+                running = running_count, max = max_for_role, ready = ready_issues.len(),
+                spawning = to_spawn,
+                "Pipeline dispatch for role"
+            );
+            for i in 0..to_spawn {
+                let issue = &ready_issues[i];
+                let slot = slots_for_role[i % slots_for_role.len()];
+                if let Err(e) = self.spawn_team_agent(team, slot, issue).await {
+                    tracing::error!(team = %team.id, role = %role_name, issue = %issue.id,
+                        "Failed to spawn pipeline agent: {}", e);
+                }
             }
         }
         Ok(())
@@ -1609,10 +1655,14 @@ impl OrchestratorRunner {
             )?
         };
 
-        // Claim the issue
+        // Claim the issue and link session to task
         {
             let conn = self.db.lock().unwrap();
             Issue::claim(&conn, &issue.id, &session.id)?;
+            conn.execute(
+                "UPDATE agent_sessions SET claimed_task_id = ?1, state = 'working' WHERE id = ?2",
+                rusqlite::params![issue.id, session.id],
+            )?;
         }
         self.log_activity("issue_claimed", &format!("Issue '{}' claimed", issue.title), Some(&team.project_id), Some(&team.id), Some(&session.id), Some(&issue.id), None);
 
