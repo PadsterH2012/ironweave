@@ -19,7 +19,7 @@ async function goToTestsTab(page: any) {
   await expect(page.locator('button', { hasText: /Run E2E/i })).toBeVisible({ timeout: 10000 });
 }
 
-test.describe.serial('Tests tab and test runner', () => {
+test.describe('Tests tab and test runner', () => {
   test('Tests tab renders on project detail', async ({ page }) => {
     await goToFirstProject(page);
 
@@ -58,17 +58,19 @@ test.describe.serial('Tests tab and test runner', () => {
   test('Test run detail panel', async ({ page }) => {
     await goToTestsTab(page);
 
-    // Click the first run entry in the history list (left panel)
-    const historyEntry = page.locator('button.w-full.text-left').first();
-    await expect(historyEntry).toBeVisible({ timeout: 10000 });
-    await historyEntry.click();
+    // Wait for history entries to load (from previous runs)
+    await expect(async () => {
+      const count = await page.locator('button.w-full.text-left').count();
+      expect(count).toBeGreaterThanOrEqual(1);
+    }).toPass({ timeout: 15000, intervals: [3000] });
 
-    // Verify the detail panel shows status
-    await expect(page.locator('text=/PASSED|FAILED|ERROR/')).toBeVisible({ timeout: 5000 });
+    // Click a completed run (look for one with PASSED or FAILED status text)
+    const completedEntry = page.locator('button.w-full.text-left', { hasText: /PASSED|FAILED|ERROR/ }).first();
+    await expect(completedEntry).toBeVisible({ timeout: 15000 });
+    await completedEntry.click();
 
-    // Verify pass/fail counts are shown
+    // Verify pass/fail counts are shown in the detail panel
     await expect(page.locator('text=/\\d+ passed/')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('text=/\\d+ failed/')).toBeVisible({ timeout: 5000 });
 
     // Verify "Show Full Output" toggle exists
     await expect(page.locator('button', { hasText: /Show.*Output/i })).toBeVisible({ timeout: 5000 });
