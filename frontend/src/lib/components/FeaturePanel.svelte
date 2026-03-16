@@ -427,6 +427,65 @@
                 </details>
               {/if}
 
+              <!-- Action buttons (before tasks so they're visible without scrolling) -->
+              <div class="flex gap-2 py-2 border-y border-gray-800">
+                {#if selectedFeature.status !== 'parked' && selectedFeature.status !== 'abandoned'}
+                  <button
+                    onclick={() => handlePark(feature.id)}
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors"
+                  >
+                    Park
+                  </button>
+                {/if}
+                {#if selectedFeature.status === 'implemented'}
+                  <button
+                    onclick={() => handleVerify(feature.id)}
+                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-600 hover:bg-green-500 text-white transition-colors"
+                  >
+                    Verify
+                  </button>
+                {/if}
+                <button
+                  onclick={() => handleAbandon(feature.id)}
+                  class="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-600 hover:bg-red-500 text-white transition-colors"
+                >
+                  Abandon
+                </button>
+                <button
+                  onclick={() => analyzeGaps(feature.id)}
+                  disabled={analyzingGaps[feature.id]}
+                  class="px-3 py-1.5 text-xs font-medium rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white transition-colors disabled:opacity-50"
+                >
+                  {analyzingGaps[feature.id] ? 'Analyzing...' : 'Gap Analysis'}
+                </button>
+              </div>
+
+              <!-- Gap Analysis Results -->
+              {#if gapResults[feature.id]}
+                {@const gaps = gapResults[feature.id]}
+                <div class="rounded-lg bg-gray-950 border border-gray-800 p-3 space-y-2">
+                  <div class="flex items-center gap-3 text-xs">
+                    <span class="text-green-400">{gaps.found} found</span>
+                    <span class="text-yellow-400">{gaps.partial} partial</span>
+                    <span class="text-red-400">{gaps.not_found} not found</span>
+                    <span class="text-gray-500">of {gaps.total}</span>
+                  </div>
+                  <div class="space-y-1 max-h-48 overflow-y-auto">
+                    {#each gaps.results as r}
+                      <div class="flex items-center gap-2 text-[10px]">
+                        <span class={r.status === 'found' ? 'text-green-400' : r.status === 'partial' ? 'text-yellow-400' : 'text-red-400'}>
+                          {r.status === 'found' ? '✓' : r.status === 'partial' ? '◐' : '✗'}
+                        </span>
+                        <span class="text-gray-300">{r.task_title}</span>
+                        {#if r.evidence && r.status !== 'not_found'}
+                          <span class="text-gray-600 truncate ml-auto" title={r.evidence}>{r.evidence.slice(0, 50)}</span>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
               <!-- Tasks -->
               <div>
                 <h4 class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Tasks</h4>
@@ -545,64 +604,7 @@
                 </div>
               {/if}
 
-              <!-- Action buttons -->
-              <div class="flex gap-2 pt-2 border-t border-gray-800">
-                {#if selectedFeature.status !== 'parked' && selectedFeature.status !== 'abandoned'}
-                  <button
-                    onclick={() => handlePark(feature.id)}
-                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors"
-                  >
-                    Park
-                  </button>
-                {/if}
-                {#if selectedFeature.status === 'implemented'}
-                  <button
-                    onclick={() => handleVerify(feature.id)}
-                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-600 hover:bg-green-500 text-white transition-colors"
-                  >
-                    Verify
-                  </button>
-                {/if}
-                <button
-                  onclick={() => handleAbandon(feature.id)}
-                  class="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-600 hover:bg-red-500 text-white transition-colors"
-                >
-                  Abandon
-                </button>
-                <button
-                  onclick={() => analyzeGaps(feature.id)}
-                  disabled={analyzingGaps[feature.id]}
-                  class="px-3 py-1.5 text-xs font-medium rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white transition-colors disabled:opacity-50"
-                >
-                  {analyzingGaps[feature.id] ? 'Analyzing...' : 'Gap Analysis'}
-                </button>
-              </div>
-
-              <!-- Gap Analysis Results -->
-              {#if gapResults[feature.id]}
-                {@const gaps = gapResults[feature.id]}
-                <div class="mt-3 rounded-lg bg-gray-950 border border-gray-800 p-3 space-y-2">
-                  <div class="flex items-center gap-3 text-xs">
-                    <span class="text-green-400">{gaps.found} found</span>
-                    <span class="text-yellow-400">{gaps.partial} partial</span>
-                    <span class="text-red-400">{gaps.not_found} not found</span>
-                    <span class="text-gray-500">of {gaps.total}</span>
-                  </div>
-                  <div class="space-y-1">
-                    {#each gaps.results as r}
-                      <div class="flex items-center gap-2 text-[10px]">
-                        <span class={r.status === 'found' ? 'text-green-400' : r.status === 'partial' ? 'text-yellow-400' : 'text-red-400'}>
-                          {r.status === 'found' ? '\u2713' : r.status === 'partial' ? '\u25D0' : '\u2717'}
-                        </span>
-                        <span class="text-gray-300">{r.task_title}</span>
-                        {#if r.evidence && r.status !== 'not_found'}
-                          <span class="text-gray-600 truncate ml-auto" title={r.evidence}>{r.evidence.slice(0, 50)}</span>
-                        {/if}
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
+              <!-- (Action buttons moved above tasks) -->
             </div>
           {/if}
         </div>
