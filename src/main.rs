@@ -293,6 +293,22 @@ async fn main() {
         .route("/api/projects/{pid}/dispatch/status", get(api::dispatch::project_status))
         .route("/api/dispatch/schedules", get(api::dispatch::list_schedules).post(api::dispatch::create_schedule))
         .route("/api/dispatch/schedules/{id}", get(api::dispatch::get_schedule).put(api::dispatch::update_schedule).delete(api::dispatch::delete_schedule))
+        // Features
+        .route("/api/projects/{pid}/features", get(api::features::list_features).post(api::features::create_feature))
+        .route("/api/projects/{pid}/features/import", post(api::features::import_prd))
+        .route("/api/projects/{pid}/features/{id}", get(api::features::get_feature).put(api::features::update_feature).delete(api::features::delete_feature))
+        .route("/api/projects/{pid}/features/{id}/park", post(api::features::park_feature))
+        .route("/api/projects/{pid}/features/{id}/verify", post(api::features::verify_feature))
+        .route("/api/features/summary", get(api::features::feature_summary))
+        // Feature tasks
+        .route("/api/features/{fid}/tasks", get(api::features::list_tasks).post(api::features::create_task))
+        .route("/api/features/{fid}/tasks/{id}", put(api::features::update_task).delete(api::features::delete_task))
+        .route("/api/features/{fid}/tasks/{id}/implement", post(api::features::implement_task))
+        // Project documents
+        .route("/api/projects/{pid}/documents/scan", post(api::project_documents::trigger_scan))
+        .route("/api/projects/{pid}/documents/gaps", get(api::project_documents::get_gaps))
+        .route("/api/projects/{pid}/documents/{type}", get(api::project_documents::get_document).put(api::project_documents::update_document))
+        .route("/api/projects/{pid}/documents/{type}/history", get(api::project_documents::get_history))
         // Knowledge graph
         .route("/api/projects/{pid}/knowledge", get(api::knowledge::list_patterns).post(api::knowledge::create_pattern))
         .route("/api/projects/{pid}/knowledge/search", post(api::knowledge::search_patterns))
