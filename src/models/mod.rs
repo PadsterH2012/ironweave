@@ -25,3 +25,6 @@ pub mod workflow_trace;
 pub mod dispatch_schedule;
 pub mod test_run;
 pub mod knowledge_pattern;
+pub mod feature;
+pub mod feature_task;
+pub mod project_document;
