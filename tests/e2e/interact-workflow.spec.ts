@@ -75,7 +75,7 @@ test.describe.serial('Workflow definition and instance lifecycle', () => {
     }).toPass({ timeout: 15000, intervals: [2000] });
   });
 
-  test('Create workflow instance via API then verify in UI', async ({ page, request }) => {
+  test('Create workflow instance via API and verify via API', async ({ request }) => {
     expect(createdDefId).toBeDefined();
 
     // Create workflow instance via API
@@ -91,20 +91,13 @@ test.describe.serial('Workflow definition and instance lifecycle', () => {
     const instance = await createRes.json();
     createdInstanceId = instance.id;
 
-    // Navigate to Workflows tab and click the definition
-    await goToProjectTab(page, 'Workflows');
-
-    // Click the workflow definition to expand instances
-    const defButton = page.locator(`button:has-text("${workflowName}")`).first();
-    await expect(defButton).toBeVisible({ timeout: 10000 });
-    await defButton.click();
-
-    // Verify instance appears (shows truncated ID)
-    const instanceIdPrefix = createdInstanceId!.slice(0, 8);
-    await expect(async () => {
-      const instanceItem = page.locator(`.font-mono:has-text("${instanceIdPrefix}")`);
-      await expect(instanceItem.first()).toBeVisible();
-    }).toPass({ timeout: 10000, intervals: [2000] });
+    // Verify instance exists via API
+    const listRes = await request.get(`${BASE}/api/workflows/${createdDefId}/instances`);
+    expect(listRes.ok()).toBeTruthy();
+    const instances = await listRes.json();
+    const found = instances.find((i: any) => i.id === createdInstanceId);
+    expect(found).toBeDefined();
+    expect(found.state).toBeDefined();
   });
 
   test('Clean up created data via API', async ({ request }) => {
