@@ -21,7 +21,9 @@
     RUNTIME_MODELS,
     PREDEFINED_ROLES,
     sync,
+    dispatch,
     type LoomEntry,
+    type ProjectDispatchStatus,
   } from '../lib/api';
   import IssueBoard from '../lib/components/IssueBoard.svelte';
   import IntakeChat from '../lib/components/IntakeChat.svelte';
@@ -52,6 +54,8 @@
   let notFound: boolean = $state(false);
   let activeTab: string = $state('teams');
   let loomEntries: LoomEntry[] = $state([]);
+  let dispatchStatus: ProjectDispatchStatus | null = $state(null);
+  let togglingDispatch: boolean = $state(false);
 
   let showIntakeChat: boolean = $state(false);
 
@@ -179,6 +183,31 @@
       error = e instanceof Error ? e.message : 'Mount toggle failed';
     } finally {
       togglingMount = false;
+    }
+  }
+
+  async function fetchDispatchStatus() {
+    try {
+      dispatchStatus = await dispatch.projectStatus(params.id);
+    } catch {
+      dispatchStatus = null;
+    }
+  }
+
+  async function handleToggleDispatch() {
+    if (!project || togglingDispatch) return;
+    togglingDispatch = true;
+    try {
+      if (dispatchStatus?.paused) {
+        await dispatch.projectResume(project.id);
+      } else {
+        await dispatch.projectPause(project.id);
+      }
+      await fetchDispatchStatus();
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Dispatch toggle failed';
+    } finally {
+      togglingDispatch = false;
     }
   }
 
@@ -318,7 +347,7 @@
   $effect(() => {
     const pid = params.id;
     if (pid) {
-      fetchProject().then(() => { autoSync(); loadAppStatus(); });
+      fetchProject().then(() => { autoSync(); loadAppStatus(); fetchDispatchStatus(); });
       fetchTeams().then(() => {
         // Fetch slots and statuses for active teams
         for (const team of teamList) {
@@ -558,6 +587,37 @@
       <span class="text-xs font-medium px-2.5 py-1 rounded-full {contextBadge(project.context)}">
         {project.context}
       </span>
+      <!-- Dispatch status badge -->
+      {#if dispatchStatus?.global_override}
+        <span class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-amber-600/20 border border-amber-600 text-amber-400">
+          <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+          Global Pause Active
+        </span>
+      {:else if dispatchStatus?.paused}
+        <span class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-red-600/20 border border-red-600 text-red-400">
+          <span class="w-2 h-2 rounded-full bg-red-500"></span>
+          Paused
+        </span>
+        <button
+          onclick={handleToggleDispatch}
+          disabled={togglingDispatch}
+          class="px-2.5 py-1 text-xs font-medium rounded-full bg-green-600/20 border border-green-600 text-green-400 hover:bg-green-600/30 transition-colors"
+        >
+          {togglingDispatch ? '...' : 'Resume'}
+        </button>
+      {:else if dispatchStatus}
+        <span class="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-green-600/20 border border-green-600 text-green-400">
+          <span class="w-2 h-2 rounded-full bg-green-400"></span>
+          Active
+        </span>
+        <button
+          onclick={handleToggleDispatch}
+          disabled={togglingDispatch}
+          class="px-2.5 py-1 text-xs font-medium rounded-full bg-gray-800 border border-gray-700 text-gray-400 hover:bg-red-600/20 hover:border-red-600 hover:text-red-400 transition-colors"
+        >
+          {togglingDispatch ? '...' : 'Pause'}
+        </button>
+      {/if}
       {#if project.mount_id}
         <button
           onclick={handleToggleMount}

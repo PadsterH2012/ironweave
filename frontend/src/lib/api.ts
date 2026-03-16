@@ -467,6 +467,42 @@ export interface SyncSnapshot {
   timestamp: string;
 }
 
+export interface DispatchStatus {
+  paused: boolean;
+  paused_at: string | null;
+  reason: string | null;
+  active_schedules: DispatchSchedule[];
+}
+
+export interface ProjectDispatchStatus {
+  paused: boolean;
+  paused_at: string | null;
+  reason: string | null;
+  global_override: boolean;
+  schedules: DispatchSchedule[];
+}
+
+export interface DispatchSchedule {
+  id: string;
+  scope: 'global' | 'project';
+  project_id: string | null;
+  cron_expression: string;
+  action: 'resume' | 'pause';
+  timezone: string;
+  is_enabled: boolean;
+  created_at: string;
+  description: string | null;
+}
+
+export interface CreateDispatchSchedule {
+  scope: 'global' | 'project';
+  project_id?: string;
+  cron_expression: string;
+  action: 'resume' | 'pause';
+  timezone?: string;
+  description?: string;
+}
+
 // ── Generic fetch helpers ────────────────────────────────────────
 
 async function get<T>(path: string): Promise<T> {
@@ -1024,4 +1060,21 @@ export const performanceLog = {
   },
   stats: (projectId: string, days?: number) =>
     get<ModelStats[]>(`/projects/${projectId}/performance/stats${days ? `?days=${days}` : ''}`),
+};
+
+// ── Dispatch Killswitch ───────────────────────────────────────────
+
+export const dispatch = {
+  status: () => get<DispatchStatus>('/dispatch/status'),
+  pause: (reason?: string) => post<DispatchStatus>('/dispatch/pause', { reason }),
+  resume: () => post<DispatchStatus>('/dispatch/resume', {}),
+  projectStatus: (pid: string) => get<ProjectDispatchStatus>(`/projects/${pid}/dispatch/status`),
+  projectPause: (pid: string, reason?: string) => post<ProjectDispatchStatus>(`/projects/${pid}/dispatch/pause`, { reason }),
+  projectResume: (pid: string) => post<ProjectDispatchStatus>(`/projects/${pid}/dispatch/resume`, {}),
+  schedules: {
+    list: () => get<DispatchSchedule[]>('/dispatch/schedules'),
+    create: (input: CreateDispatchSchedule) => post<DispatchSchedule>('/dispatch/schedules', input),
+    update: (id: string, input: Partial<DispatchSchedule>) => put<DispatchSchedule>(`/dispatch/schedules/${id}`, input),
+    delete: (id: string) => del(`/dispatch/schedules/${id}`),
+  },
 };

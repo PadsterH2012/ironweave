@@ -18,6 +18,7 @@
   import AgentUtilChart from '../lib/components/AgentUtilChart.svelte';
   import MergeHealthChart from '../lib/components/MergeHealthChart.svelte';
   import SystemHealthPanel from '../lib/components/SystemHealth.svelte';
+  import KillSwitch from '../lib/components/KillSwitch.svelte';
 
   let stats: DashboardStats | null = $state(null);
   let agentSessions: AgentInfo[] = $state([]);
@@ -100,6 +101,9 @@
     <h1 class="text-2xl font-bold text-white">Dashboard</h1>
     <p class="mt-1 text-sm text-gray-400">Overview of projects, agents, and workflows.</p>
   </div>
+
+  <!-- Dispatch Kill Switch -->
+  <KillSwitch />
 
   <!-- Error banner -->
   {#if error}
