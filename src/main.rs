@@ -293,6 +293,12 @@ async fn main() {
         .route("/api/projects/{pid}/dispatch/status", get(api::dispatch::project_status))
         .route("/api/dispatch/schedules", get(api::dispatch::list_schedules).post(api::dispatch::create_schedule))
         .route("/api/dispatch/schedules/{id}", get(api::dispatch::get_schedule).put(api::dispatch::update_schedule).delete(api::dispatch::delete_schedule))
+        // Knowledge graph
+        .route("/api/projects/{pid}/knowledge", get(api::knowledge::list_patterns).post(api::knowledge::create_pattern))
+        .route("/api/projects/{pid}/knowledge/search", post(api::knowledge::search_patterns))
+        .route("/api/projects/{pid}/knowledge/extract", post(api::knowledge::trigger_extraction))
+        .route("/api/projects/{pid}/knowledge/{id}", get(api::knowledge::get_pattern).put(api::knowledge::update_pattern).delete(api::knowledge::delete_pattern))
+        .route("/api/knowledge/cross-project", get(api::knowledge::cross_project_search))
         // Test runner
         .route("/api/projects/{pid}/tests/run", post(api::tests::trigger_run))
         .route("/api/projects/{pid}/tests/runs", get(api::tests::list_runs))
