@@ -28,3 +28,4 @@ pub mod code_graph;
 pub mod workflow_traces;
 pub mod cross_project;
 pub mod dispatch;
+pub mod tests;

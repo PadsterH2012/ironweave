@@ -292,7 +292,13 @@ async fn main() {
         .route("/api/projects/{pid}/dispatch/resume", post(api::dispatch::project_resume))
         .route("/api/projects/{pid}/dispatch/status", get(api::dispatch::project_status))
         .route("/api/dispatch/schedules", get(api::dispatch::list_schedules).post(api::dispatch::create_schedule))
-        .route("/api/dispatch/schedules/{id}", get(api::dispatch::get_schedule).put(api::dispatch::update_schedule).delete(api::dispatch::delete_schedule));
+        .route("/api/dispatch/schedules/{id}", get(api::dispatch::get_schedule).put(api::dispatch::update_schedule).delete(api::dispatch::delete_schedule))
+        // Test runner
+        .route("/api/projects/{pid}/tests/run", post(api::tests::trigger_run))
+        .route("/api/projects/{pid}/tests/runs", get(api::tests::list_runs))
+        .route("/api/projects/{pid}/tests/runs/{id}", get(api::tests::get_run))
+        .route("/api/projects/{pid}/tests/latest", get(api::tests::latest_run))
+        .route("/api/projects/{pid}/tests/runs/{id}/stop", post(api::tests::stop_run));
 
     // Only add auth middleware if auth is configured
     if auth_config.is_some() {
