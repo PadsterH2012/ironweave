@@ -701,6 +701,58 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_knowledge_shared ON knowledge_patterns(is_shared);
     ")?;
 
+    // ── Features table ───────────────────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS features (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'idea'
+                CHECK(status IN ('idea', 'designed', 'in_progress', 'implemented', 'verified', 'parked', 'abandoned')),
+            prd_content TEXT,
+            implementation_notes TEXT,
+            parked_at TEXT,
+            parked_reason TEXT,
+            priority INTEGER NOT NULL DEFAULT 5,
+            keywords TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_features_project ON features(project_id);
+        CREATE INDEX IF NOT EXISTS idx_features_status ON features(status);
+    ")?;
+
+    // ── Feature tasks table ──────────────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS feature_tasks (
+            id TEXT PRIMARY KEY,
+            feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo', 'done', 'skipped')),
+            issue_id TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_feature_tasks_feature ON feature_tasks(feature_id);
+    ")?;
+
+    // ── Project documents table ──────────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS project_documents (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            doc_type TEXT NOT NULL CHECK(doc_type IN ('intent', 'reality', 'changelog')),
+            content TEXT NOT NULL DEFAULT '',
+            version INTEGER NOT NULL DEFAULT 1,
+            previous_content TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_by TEXT NOT NULL DEFAULT 'user'
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_documents_project ON project_documents(project_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_documents_unique ON project_documents(project_id, doc_type);
+    ")?;
+
     Ok(())
 }
 
@@ -933,5 +985,45 @@ mod tests {
             .query_row("SELECT pattern_type FROM knowledge_patterns WHERE id = 'kp1'", [], |row| row.get(0))
             .unwrap();
         assert_eq!(pt, "solution");
+    }
+
+    #[test]
+    fn test_features_table_exists() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_migrations(&conn).unwrap();
+        conn.execute("INSERT INTO projects (id, name, directory, context) VALUES ('p1', 'proj', '/tmp', 'work')", []).unwrap();
+        conn.execute(
+            "INSERT INTO features (id, project_id, title, status) VALUES ('f1', 'p1', 'Test Feature', 'idea')",
+            [],
+        ).unwrap();
+        let status: String = conn.query_row("SELECT status FROM features WHERE id = 'f1'", [], |row| row.get(0)).unwrap();
+        assert_eq!(status, "idea");
+    }
+
+    #[test]
+    fn test_feature_tasks_table_exists() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_migrations(&conn).unwrap();
+        conn.execute("INSERT INTO projects (id, name, directory, context) VALUES ('p1', 'proj', '/tmp', 'work')", []).unwrap();
+        conn.execute("INSERT INTO features (id, project_id, title) VALUES ('f1', 'p1', 'Feature')", []).unwrap();
+        conn.execute("INSERT INTO feature_tasks (id, feature_id, title) VALUES ('ft1', 'f1', 'Task 1')", []).unwrap();
+        let title: String = conn.query_row("SELECT title FROM feature_tasks WHERE id = 'ft1'", [], |row| row.get(0)).unwrap();
+        assert_eq!(title, "Task 1");
+    }
+
+    #[test]
+    fn test_project_documents_table_exists() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_migrations(&conn).unwrap();
+        conn.execute("INSERT INTO projects (id, name, directory, context) VALUES ('p1', 'proj', '/tmp', 'work')", []).unwrap();
+        conn.execute(
+            "INSERT INTO project_documents (id, project_id, doc_type, content) VALUES ('d1', 'p1', 'intent', 'My vision')",
+            [],
+        ).unwrap();
+        let content: String = conn.query_row("SELECT content FROM project_documents WHERE id = 'd1'", [], |row| row.get(0)).unwrap();
+        assert_eq!(content, "My vision");
     }
 }
