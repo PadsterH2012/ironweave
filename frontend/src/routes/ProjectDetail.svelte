@@ -41,6 +41,7 @@
   import CoordinatorPanel from '../lib/components/CoordinatorPanel.svelte';
   import RoutingSuggestions from '../lib/components/RoutingSuggestions.svelte';
   import TeamRoleOverrides from '../lib/components/TeamRoleOverrides.svelte';
+  import KnowledgePanel from '../lib/components/KnowledgePanel.svelte';
   import TestRunPanel from '../lib/components/TestRunPanel.svelte';
 
   interface Props {
@@ -114,6 +115,7 @@
     { key: 'costs', label: 'Costs' },
     { key: 'coordinator', label: 'Coordinator' },
     { key: 'routing', label: 'Routing' },
+    { key: 'knowledge', label: 'Knowledge' },
     { key: 'tests', label: 'Tests' },
     { key: 'settings', label: 'Settings' },
   ]);
@@ -1136,6 +1138,8 @@
       <CoordinatorPanel projectId={params.id} />
     {:else if activeTab === 'routing'}
       <RoutingSuggestions projectId={params.id} />
+    {:else if activeTab === 'knowledge'}
+      <KnowledgePanel projectId={params.id} />
     {:else if activeTab === 'tests'}
       <TestRunPanel projectId={params.id} />
     {:else if activeTab === 'settings'}

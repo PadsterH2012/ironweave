@@ -1114,3 +1114,73 @@ export const testRunner = {
   stop: (projectId: string, id: string) =>
     post<void>(`/projects/${projectId}/tests/runs/${id}/stop`, {}),
 };
+
+// ── Knowledge Graph ───────────────────────────────────────────────
+
+export interface KnowledgePattern {
+  id: string;
+  project_id: string;
+  pattern_type: 'solution' | 'gotcha' | 'preference' | 'recipe';
+  role: string | null;
+  task_type: string | null;
+  keywords: string;
+  title: string;
+  content: string;
+  confidence: number;
+  observations: number;
+  source_type: 'trace' | 'performance' | 'loom' | 'manual';
+  source_id: string | null;
+  files_involved: string | null;
+  is_shared: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateKnowledgePattern {
+  pattern_type: string;
+  role?: string;
+  task_type?: string;
+  keywords?: string[];
+  title: string;
+  content: string;
+  source_type: string;
+  files_involved?: string[];
+  is_shared?: boolean;
+}
+
+export interface KnowledgeSearchResult extends KnowledgePattern {
+  score: number;
+  source_project: string;
+}
+
+export const knowledge = {
+  list: (projectId: string, params?: { pattern_type?: string; role?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.pattern_type) q.set('pattern_type', params.pattern_type);
+    if (params?.role) q.set('role', params.role);
+    if (params?.limit) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return get<KnowledgePattern[]>(`/projects/${projectId}/knowledge${qs ? `?${qs}` : ''}`);
+  },
+  get: (projectId: string, id: string) =>
+    get<KnowledgePattern>(`/projects/${projectId}/knowledge/${id}`),
+  create: (projectId: string, data: CreateKnowledgePattern) =>
+    post<KnowledgePattern>(`/projects/${projectId}/knowledge`, data),
+  search: (projectId: string, query: { query: string; role?: string; task_type?: string; pattern_type?: string; files?: string[] }) =>
+    post<KnowledgeSearchResult[]>(`/projects/${projectId}/knowledge/search`, query),
+  crossProject: (params?: { query?: string; role?: string; task_type?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.query) q.set('query', params.query);
+    if (params?.role) q.set('role', params.role);
+    if (params?.task_type) q.set('task_type', params.task_type);
+    if (params?.limit) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return get<KnowledgeSearchResult[]>(`/knowledge/cross-project${qs ? `?${qs}` : ''}`);
+  },
+  update: (projectId: string, id: string, data: Partial<KnowledgePattern>) =>
+    put<KnowledgePattern>(`/projects/${projectId}/knowledge/${id}`, data),
+  delete: (projectId: string, id: string) =>
+    del(`/projects/${projectId}/knowledge/${id}`),
+  extract: (projectId: string) =>
+    post<{ extracted: number }>(`/projects/${projectId}/knowledge/extract`, {}),
+};
