@@ -1081,3 +1081,36 @@ export const dispatch = {
     delete: (id: string) => del(`/dispatch/schedules/${id}`),
   },
 };
+
+// ── Test Runner ───────────────────────────────────────────────────
+
+export interface TestRun {
+  id: string;
+  project_id: string;
+  status: 'pending' | 'running' | 'passed' | 'failed' | 'error';
+  test_type: 'e2e' | 'unit' | 'full';
+  target_url: string | null;
+  total_tests: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration_seconds: number | null;
+  output: string | null;
+  failed_tests: string;
+  triggered_by: 'manual' | 'orchestrator' | 'merge-queue';
+  created_at: string;
+  completed_at: string | null;
+}
+
+export const testRunner = {
+  trigger: (projectId: string, testType = 'e2e') =>
+    post<TestRun>(`/projects/${projectId}/tests/run`, { test_type: testType }),
+  list: (projectId: string, limit = 50) =>
+    get<TestRun[]>(`/projects/${projectId}/tests/runs?limit=${limit}`),
+  get: (projectId: string, id: string) =>
+    get<TestRun>(`/projects/${projectId}/tests/runs/${id}`),
+  latest: (projectId: string) =>
+    get<TestRun | null>(`/projects/${projectId}/tests/latest`),
+  stop: (projectId: string, id: string) =>
+    post<void>(`/projects/${projectId}/tests/runs/${id}/stop`, {}),
+};
