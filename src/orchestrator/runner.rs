@@ -1557,6 +1557,40 @@ impl OrchestratorRunner {
             .unwrap_or_default();
         let file_tree = crate::orchestrator::context::generate_file_tree(working_path);
 
+        // Check for accepted routing overrides that apply to this slot's model
+        let (effective_model, effective_runtime) = {
+            let conn = self.db.lock().unwrap();
+            let overrides = crate::models::routing_override::RoutingOverride::get_accepted_for_role(
+                &conn, &team.project_id, &slot.role, &issue.issue_type,
+            ).unwrap_or_default();
+
+            // Check if any accepted override targets the current slot's model
+            let matching_override = overrides.iter().find(|o| {
+                o.from_model.as_deref() == slot.model.as_deref()
+            });
+
+            if let Some(ov) = matching_override {
+                // Look up the role's default model/runtime at the higher tier
+                let role_defaults = crate::models::role::Role::get_by_name(&conn, &slot.role).ok();
+                let new_model = role_defaults.as_ref().and_then(|r| r.default_model.clone());
+                let new_runtime = role_defaults.as_ref().map(|r| r.default_runtime.clone())
+                    .unwrap_or_else(|| slot.runtime.clone());
+
+                tracing::info!(
+                    role = %slot.role,
+                    from_model = ?slot.model,
+                    to_model = ?new_model,
+                    to_runtime = %new_runtime,
+                    to_tier = ov.to_tier,
+                    override_id = %ov.id,
+                    "Applying accepted routing override — escalating model"
+                );
+                (new_model, new_runtime)
+            } else {
+                (slot.model.clone(), slot.runtime.clone())
+            }
+        };
+
         // Create AgentSession record
         let session = {
             let conn = self.db.lock().unwrap();
@@ -1565,8 +1599,8 @@ impl OrchestratorRunner {
                 &CreateAgentSession {
                     team_id: team.id.clone(),
                     slot_id: slot.id.clone(),
-                    runtime: slot.runtime.clone(),
-                    model: slot.model.clone(),
+                    runtime: effective_runtime.clone(),
+                    model: effective_model.clone(),
                     workflow_instance_id: None,
                     pid: None,
                     worktree_path: worktree_path.as_ref().map(|p| p.to_string_lossy().to_string()),
@@ -1699,7 +1733,7 @@ impl OrchestratorRunner {
             skills: None,
             extra_args: Some(vec!["--print".to_string()]),
             playwright_env: None,
-            model: slot.model.clone(),
+            model: effective_model.clone(),
         };
 
         let size = PtySize {
@@ -1711,7 +1745,7 @@ impl OrchestratorRunner {
 
         // Spawn PTY agent via process_manager
         if let Err(e) = self.process_manager
-            .spawn_agent(&session.id, &slot.runtime, config, size)
+            .spawn_agent(&session.id, &effective_runtime, config, size)
             .await
         {
             // Clean up claim and session on spawn failure
