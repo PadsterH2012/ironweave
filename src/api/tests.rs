@@ -51,11 +51,18 @@ pub async fn trigger_run(
 
         let start = std::time::Instant::now();
 
+        // Find the test directory: check project dir first, then parent dirs
+        let test_dir = find_test_dir(&directory);
+
         let mut cmd = tokio::process::Command::new("npx");
-        cmd.arg("playwright")
-            .arg("test")
-            .arg("--reporter=json")
-            .current_dir(&directory);
+        cmd.arg("playwright").arg("test").arg("--reporter=json");
+
+        if let Some(ref td) = test_dir {
+            cmd.arg("--config").arg(td.join("playwright.config.ts"));
+            cmd.current_dir(td);
+        } else {
+            cmd.current_dir(&directory);
+        }
 
         if let Some(ref url) = app_url {
             cmd.env("BASE_URL", url);
@@ -173,6 +180,34 @@ pub async fn stop_run(
     TestRun::update_status(&conn, &id, "error")
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|_| StatusCode::NOT_FOUND)
+}
+
+/// Find the test directory by searching for tests/e2e/playwright.config.ts.
+/// Checks: project dir, then walks up parent dirs (handles mounts pointing into repos).
+fn find_test_dir(project_dir: &str) -> Option<std::path::PathBuf> {
+    let project_path = std::path::Path::new(project_dir);
+
+    // Check project_dir/tests/e2e/
+    let candidate = project_path.join("tests/e2e");
+    if candidate.join("playwright.config.ts").exists() {
+        return Some(candidate);
+    }
+
+    // Walk up parent directories (max 5 levels) looking for tests/e2e/
+    let mut current = project_path.to_path_buf();
+    for _ in 0..5 {
+        if let Some(parent) = current.parent() {
+            let candidate = parent.join("tests/e2e");
+            if candidate.join("playwright.config.ts").exists() {
+                return Some(candidate);
+            }
+            current = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+
+    None
 }
 
 /// Recursively walk Playwright JSON suites to collect failed test names.
