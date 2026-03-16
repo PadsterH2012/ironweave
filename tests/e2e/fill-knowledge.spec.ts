@@ -17,7 +17,7 @@ test.describe('Knowledge API contract tests', () => {
     const res = await request.post(`${BASE}/api/projects/${PROJECT_ID}/knowledge`, {
       data: {
         project_id: PROJECT_ID,
-        pattern_type: 'manual',
+        pattern_type: 'solution',
         title: 'API Test',
         content: 'Test',
         source_type: 'manual',

@@ -27,13 +27,9 @@ test.describe.serial('Knowledge interactions on Ironweave project', () => {
     await titleInput.fill(patternTitle);
 
     // Fill content
-    const contentArea = page.locator('textarea[placeholder*="Content"]');
+    const contentArea = page.locator('textarea').first();
     await expect(contentArea).toBeVisible({ timeout: 5000 });
     await contentArea.fill('Test knowledge content');
-
-    // Select type "solution" (already default, but explicitly set it)
-    const typeSelect = page.locator('select').nth(1); // second select (first is filter)
-    await typeSelect.selectOption('solution');
 
     // Click "Create"
     const createButton = page.locator('button', { hasText: /^Create$/ });
