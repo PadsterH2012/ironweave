@@ -173,10 +173,25 @@ impl RoutingOverride {
             let (role, model, task_type, tier, total, failures) = row?;
             let failure_rate = failures as f64 / total as f64;
 
-            // Check if we already have a pending suggestion for this combo
+            // Skip if this model is no longer in any active team slot
+            let in_active_slot: bool = conn.query_row(
+                "SELECT COUNT(*) FROM team_agent_slots tas
+                 JOIN teams t ON tas.team_id = t.id
+                 WHERE t.project_id = ?1 AND t.is_active = 1
+                   AND (tas.model = ?2 OR tas.role = ?3)
+                   AND tas.model = ?2",
+                params![project_id, model, role],
+                |row| row.get::<_, i64>(0),
+            ).unwrap_or(0) > 0;
+            if !in_active_slot {
+                continue;
+            }
+
+            // Check if we already have a pending or recently resolved suggestion for this combo
             let existing: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM model_routing_overrides
-                 WHERE project_id = ?1 AND role = ?2 AND task_type = ?3 AND from_model = ?4 AND status = 'suggested'",
+                 WHERE project_id = ?1 AND role = ?2 AND task_type = ?3 AND from_model = ?4
+                   AND status IN ('suggested', 'accepted', 'rejected')",
                 params![project_id, role, task_type, model],
                 |row| row.get(0),
             )?;
