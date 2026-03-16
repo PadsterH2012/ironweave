@@ -456,33 +456,16 @@
                   disabled={analyzingGaps[feature.id]}
                   class="px-3 py-1.5 text-xs font-medium rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white transition-colors disabled:opacity-50"
                 >
-                  {analyzingGaps[feature.id] ? 'Analyzing...' : 'Gap Analysis'}
+                  {analyzingGaps[feature.id] ? 'Dispatching...' : 'Request Gap Analysis'}
                 </button>
               </div>
 
               <!-- Gap Analysis Results -->
               {#if gapResults[feature.id]}
-                {@const gaps = gapResults[feature.id]}
-                <div class="rounded-lg bg-gray-950 border border-gray-800 p-3 space-y-2">
-                  <div class="flex items-center gap-3 text-xs">
-                    <span class="text-green-400">{gaps.found} found</span>
-                    <span class="text-yellow-400">{gaps.partial} partial</span>
-                    <span class="text-red-400">{gaps.not_found} not found</span>
-                    <span class="text-gray-500">of {gaps.total}</span>
-                  </div>
-                  <div class="space-y-1 max-h-48 overflow-y-auto">
-                    {#each gaps.results as r}
-                      <div class="flex items-center gap-2 text-[10px]">
-                        <span class={r.status === 'found' ? 'text-green-400' : r.status === 'partial' ? 'text-yellow-400' : 'text-red-400'}>
-                          {r.status === 'found' ? '✓' : r.status === 'partial' ? '◐' : '✗'}
-                        </span>
-                        <span class="text-gray-300">{r.task_title}</span>
-                        {#if r.evidence && r.status !== 'not_found'}
-                          <span class="text-gray-600 truncate ml-auto" title={r.evidence}>{r.evidence.slice(0, 50)}</span>
-                        {/if}
-                      </div>
-                    {/each}
-                  </div>
+                {@const result = gapResults[feature.id]}
+                <div class="rounded-lg bg-cyan-900/20 border border-cyan-800/40 px-3 py-2 text-xs text-cyan-300">
+                  {result.message}
+                  <span class="text-gray-500 ml-2">Issue: {result.issue_id.slice(0, 8)}</span>
                 </div>
               {/if}
 

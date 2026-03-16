@@ -1270,7 +1270,7 @@ export const features = {
   import: (projectId: string, text: string) => post<Feature>(`/projects/${projectId}/features/import`, { text }),
   summary: () => get<FeatureSummary[]>('/features/summary'),
   gaps: (projectId: string, featureId: string) =>
-    get<{ feature_id: string; feature_title: string; found: number; partial: number; not_found: number; total: number; results: Array<{ task_title: string; status: string; evidence: string }> }>(`/projects/${projectId}/features/${featureId}/gaps`),
+    post<{ issue_id: string; message: string }>(`/projects/${projectId}/features/${featureId}/gaps`, {}),
 };
 
 export const featureTasks = {

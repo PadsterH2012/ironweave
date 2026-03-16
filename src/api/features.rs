@@ -243,121 +243,105 @@ pub async fn delete_task(
 // --- Gap Analysis ---
 
 #[derive(Serialize)]
-pub struct FeatureGapResult {
-    pub task_title: String,
-    pub status: String,       // found, partial, not_found
-    pub evidence: String,     // what was found in the codebase (or why not)
+pub struct GapAnalysisTriggered {
+    pub issue_id: String,
+    pub message: String,
 }
 
-#[derive(Serialize)]
-pub struct FeatureGapAnalysis {
-    pub feature_id: String,
-    pub feature_title: String,
-    pub found: i64,
-    pub partial: i64,
-    pub not_found: i64,
-    pub total: i64,
-    pub results: Vec<FeatureGapResult>,
-}
-
-fn scan_dir_recursive(dir: &str, keywords: &[String], found_in: &mut Vec<String>, depth: u32) {
-    if depth > 5 { return; }
-    let Ok(entries) = std::fs::read_dir(dir) else { return; };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-
-        // Skip hidden, node_modules, target, .git
-        if name.starts_with('.') || name == "node_modules" || name == "target" { continue; }
-
-        if path.is_dir() {
-            scan_dir_recursive(&path.to_string_lossy(), keywords, found_in, depth + 1);
-        } else if path.is_file() {
-            let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
-            if !["rs", "ts", "js", "svelte", "md", "toml", "json", "py", "sh", "yml", "yaml", "css", "html"].contains(&ext.as_str()) {
-                continue;
-            }
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                let lower = content.to_lowercase();
-                for keyword in keywords {
-                    if lower.contains(&keyword.to_lowercase()) {
-                        let relative = path.strip_prefix(dir).unwrap_or(&path).to_string_lossy().to_string();
-                        if !found_in.contains(&relative) {
-                            found_in.push(relative);
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn scan_project_for_keywords(project_dir: &str, keywords: &[String]) -> (String, String) {
-    let mut found_in: Vec<String> = Vec::new();
-
-    if std::fs::read_dir(project_dir).is_ok() {
-        scan_dir_recursive(project_dir, keywords, &mut found_in, 0);
-    }
-
-    let match_ratio = if keywords.is_empty() { 0.0 } else {
-        let matched = keywords.iter().filter(|k| {
-            found_in.iter().any(|f| f.to_lowercase().contains(&k.to_lowercase()))
-        }).count();
-        matched as f64 / keywords.len() as f64
-    };
-
-    if match_ratio > 0.5 {
-        ("found".into(), format!("Keywords found in: {}", found_in.join(", ")))
-    } else if match_ratio > 0.0 {
-        ("partial".into(), format!("Some keywords found in: {}", found_in.join(", ")))
-    } else {
-        ("not_found".into(), "No matching keywords found in codebase".into())
-    }
-}
-
-/// Analyze gaps between feature tasks and codebase
+/// Dispatch a Gap Analyst agent to analyze gaps between feature tasks and codebase
 pub async fn analyze_gaps(
     Path((pid, fid)): Path<(String, String)>,
     State(state): State<AppState>,
-) -> Result<Json<FeatureGapAnalysis>, StatusCode> {
-    let (feature, tasks, project_dir) = {
+) -> Result<Json<GapAnalysisTriggered>, StatusCode> {
+    let (feature, tasks, project_id) = {
         let conn = state.conn()?;
         let feature = Feature::get_by_id(&conn, &fid).map_err(|_| StatusCode::NOT_FOUND)?;
         let tasks = FeatureTask::list_by_feature(&conn, &fid).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         let project = crate::models::project::Project::get_by_id(&conn, &pid).map_err(|_| StatusCode::NOT_FOUND)?;
-        (feature, tasks, project.directory)
+        (feature, tasks, project.id)
     };
 
-    let mut results = Vec::new();
-    let mut found = 0i64;
-    let mut partial = 0i64;
-    let mut not_found = 0i64;
+    let prd_content = feature.prd_content.as_deref().unwrap_or("(no PRD content)");
 
-    for task in &tasks {
-        let keywords = crate::models::knowledge_pattern::extract_keywords(&task.title);
-        let (status, evidence) = scan_project_for_keywords(&project_dir, &keywords);
-        match status.as_str() {
-            "found" => found += 1,
-            "partial" => partial += 1,
-            _ => not_found += 1,
-        }
-        results.push(FeatureGapResult {
-            task_title: task.title.clone(),
-            status,
-            evidence,
-        });
+    let task_list = tasks.iter().enumerate()
+        .map(|(i, t)| format!("{}. {}", i + 1, t.title))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Build the prompt — the placeholder {{ISSUE_ID}} is replaced after issue creation
+    let prompt_template = format!(
+        r#"You are performing a gap analysis for the feature: "{feature_title}"
+
+## Feature Description
+{feature_description}
+
+## PRD Content
+{prd_content}
+
+## Tasks to Verify
+{task_list}
+
+## Your Job
+
+For each task listed above, search the project codebase to determine if it has been implemented.
+
+For each task, report one of:
+- FOUND: The task is implemented. Include the file path(s) where evidence was found.
+- PARTIAL: Some aspects are implemented but not complete. Explain what's missing.
+- NOT_FOUND: No evidence of implementation found.
+
+When done, update this issue with your findings as the summary using:
+curl -sk -X PATCH ${{IRONWEAVE_API}}/api/projects/{project_id}/issues/{{ISSUE_ID}} \
+  -H 'Content-Type: application/json' \
+  -d '{{"status": "closed", "summary": "<your findings in markdown format>"}}'
+
+Format your summary as:
+## Gap Analysis Results
+- ✓ FOUND: {{task}} — {{evidence}}
+- ◐ PARTIAL: {{task}} — {{what's missing}}
+- ✗ NOT_FOUND: {{task}}
+
+## Summary
+X found, Y partial, Z not found out of N total"#,
+        feature_title = feature.title,
+        feature_description = feature.description,
+        prd_content = prd_content,
+        task_list = task_list,
+        project_id = project_id,
+    );
+
+    let issue = {
+        let conn = state.conn()?;
+        Issue::create(&conn, &CreateIssue {
+            project_id: project_id.clone(),
+            title: format!("Gap Analysis: {}", feature.title),
+            description: Some(prompt_template.replace("{{ISSUE_ID}}", "")),
+            issue_type: Some("task".into()),
+            priority: Some(3),
+            depends_on: None,
+            workflow_instance_id: None,
+            stage_id: None,
+            role: Some("Gap Analyst".into()),
+            parent_id: None,
+            needs_intake: Some(0),
+            scope_mode: Some("auto".into()),
+        }).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    };
+
+    // Now update the description with the real issue ID
+    {
+        let conn = state.conn()?;
+        let updated_description = prompt_template.replace("{{ISSUE_ID}}", &issue.id);
+        let update = crate::models::issue::UpdateIssue {
+            description: Some(updated_description),
+            ..Default::default()
+        };
+        let _ = Issue::update(&conn, &issue.id, &update);
     }
 
-    Ok(Json(FeatureGapAnalysis {
-        feature_id: fid,
-        feature_title: feature.title,
-        found,
-        partial,
-        not_found,
-        total: tasks.len() as i64,
-        results,
+    Ok(Json(GapAnalysisTriggered {
+        issue_id: issue.id,
+        message: format!("Gap analysis agent dispatched for '{}'", feature.title),
     }))
 }
 

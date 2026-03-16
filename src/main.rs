@@ -299,7 +299,7 @@ async fn main() {
         .route("/api/projects/{pid}/features/{id}", get(api::features::get_feature).put(api::features::update_feature).delete(api::features::delete_feature))
         .route("/api/projects/{pid}/features/{id}/park", post(api::features::park_feature))
         .route("/api/projects/{pid}/features/{id}/verify", post(api::features::verify_feature))
-        .route("/api/projects/{pid}/features/{id}/gaps", get(api::features::analyze_gaps))
+        .route("/api/projects/{pid}/features/{id}/gaps", post(api::features::analyze_gaps))
         .route("/api/features/summary", get(api::features::feature_summary))
         // Feature tasks
         .route("/api/features/{fid}/tasks", get(api::features::list_tasks).post(api::features::create_task))
