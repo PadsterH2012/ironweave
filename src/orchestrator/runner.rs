@@ -110,6 +110,7 @@ pub struct OrchestratorRunner {
     intake_agents: HashMap<String, (String, String)>,
     worktree_manager: WorktreeManager,
     build_server: Option<crate::config::BuildServerConfig>,
+    last_knowledge_extraction: std::time::Instant,
 }
 
 impl OrchestratorRunner {
@@ -130,6 +131,7 @@ impl OrchestratorRunner {
             intake_agents: HashMap::new(),
             worktree_manager: WorktreeManager::new(worktree_base),
             build_server: None,
+            last_knowledge_extraction: std::time::Instant::now(),
         }
     }
 
@@ -545,6 +547,82 @@ impl OrchestratorRunner {
         Ok(())
     }
 
+    // ── Knowledge extraction methods ──────────────────────────────
+
+    fn extract_solution_pattern(&self, issue: &Issue, project_id: &str) {
+        use crate::models::knowledge_pattern::KnowledgePattern;
+
+        let title = format!("Solution: {}", issue.title);
+        let content = issue.summary.clone().unwrap_or_else(|| issue.description.clone());
+
+        // Check if project shares learning
+        let is_shared = {
+            let conn = self.db.lock().unwrap();
+            let _project = crate::models::project::Project::get_by_id(&conn, project_id).ok();
+            // share_learning field might not exist — default to false
+            false // TODO: check project.share_learning when field exists
+        };
+
+        let conn = self.db.lock().unwrap();
+        if let Err(e) = KnowledgePattern::merge_or_increment(
+            &conn, project_id, "solution", issue.role.as_deref(), Some(&issue.issue_type),
+            &title, &content, "trace", Some(&issue.id), None, is_shared,
+        ) {
+            tracing::warn!("Failed to extract solution pattern: {}", e);
+        }
+    }
+
+    fn extract_gotcha_pattern(&self, issue: &Issue, project_id: &str, failure_reason: &str) {
+        use crate::models::knowledge_pattern::KnowledgePattern;
+
+        let title = format!("Gotcha: {}", issue.title);
+        let content = format!("Task '{}' failed. Reason: {}", issue.title, failure_reason);
+
+        let conn = self.db.lock().unwrap();
+        if let Err(e) = KnowledgePattern::merge_or_increment(
+            &conn, project_id, "gotcha", issue.role.as_deref(), Some(&issue.issue_type),
+            &title, &content, "loom", Some(&issue.id), None, false,
+        ) {
+            tracing::warn!("Failed to extract gotcha pattern: {}", e);
+        }
+    }
+
+    fn extract_knowledge_batch(&self) {
+        use crate::models::knowledge_pattern::KnowledgePattern;
+
+        let conn = self.db.lock().unwrap();
+
+        // Extract preference patterns from performance logs
+        // Get model stats for each project and create preference patterns
+        let projects: Vec<String> = conn.prepare("SELECT id FROM projects")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| row.get::<_, String>(0))
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            })
+            .unwrap_or_default();
+
+        for project_id in &projects {
+            // Get recent model stats
+            if let Ok(stats) = crate::models::performance_log::PerformanceLogEntry::model_stats(&conn, project_id, 7) {
+                for stat in &stats {
+                    if stat.total >= 5 && stat.success_rate > 0.8 {
+                        let title = format!("Preference: {} works well with {} on {} tasks", stat.role, stat.model, stat.role);
+                        let content = format!(
+                            "Model {} has a {:.0}% success rate for role {} ({} tasks, avg cost ${:.4}, avg duration {:.0}s)",
+                            stat.model, stat.success_rate * 100.0, stat.role, stat.total, stat.avg_cost, stat.avg_duration
+                        );
+                        let _ = KnowledgePattern::merge_or_increment(
+                            &conn, project_id, "preference", Some(&stat.role), None,
+                            &title, &content, "performance", None, None, false,
+                        );
+                    }
+                }
+            }
+        }
+
+        tracing::debug!("Knowledge batch extraction completed");
+    }
+
     // ── sweep (Task 10) ────────────────────────────────────────────
 
     async fn sweep(&mut self) {
@@ -600,6 +678,12 @@ impl OrchestratorRunner {
         // Merge queue processing
         if let Err(e) = self.sweep_merge_queue().await {
             tracing::error!("Merge queue sweep error: {}", e);
+        }
+
+        // Knowledge extraction batch (every 10 minutes)
+        if self.last_knowledge_extraction.elapsed() > std::time::Duration::from_secs(600) {
+            self.extract_knowledge_batch();
+            self.last_knowledge_extraction = std::time::Instant::now();
         }
 
         // Remove completed/failed workflows from active map
@@ -1052,6 +1136,17 @@ impl OrchestratorRunner {
                     }
                 }
 
+                // Extract solution pattern for knowledge graph
+                {
+                    let project_id = {
+                        let conn = self.db.lock().unwrap();
+                        Team::get_by_id(&conn, &ta.team_id)
+                            .map(|t| t.project_id)
+                            .unwrap_or_default()
+                    };
+                    self.extract_solution_pattern(&issue, &project_id);
+                }
+
                 // Note: worktree cleanup happens after merge in sweep_merge_queue
                 to_remove.push(key.clone());
                 continue;
@@ -1255,6 +1350,16 @@ impl OrchestratorRunner {
                     let conn = self.db.lock().unwrap();
                     let _ = Issue::unclaim(&conn, &ta.issue_id);
                     let _ = AgentSession::update_state(&conn, &ta.agent_session_id, "failed");
+                }
+                // Extract gotcha pattern for knowledge graph
+                {
+                    let project_id = {
+                        let conn = self.db.lock().unwrap();
+                        Team::get_by_id(&conn, &ta.team_id)
+                            .map(|t| t.project_id)
+                            .unwrap_or_default()
+                    };
+                    self.extract_gotcha_pattern(&issue, &project_id, "Agent exceeded idle threshold");
                 }
                 self.cleanup_agent_worktree(&idle_session_id);
                 to_remove.push(key.clone());
@@ -1841,6 +1946,20 @@ impl OrchestratorRunner {
             team_id = team.id,
             project_id = team.project_id,
             agent_id = session.id,
+        ));
+
+        // Knowledge base query instructions
+        prompt_parts.push(format!(
+            "\n## Knowledge Base\n\
+            Before starting complex work, check if similar tasks have been solved before:\n\
+            curl -sk -X POST ${{IRONWEAVE_API}}/api/projects/{}/knowledge/search \\\n  \
+            -H 'Content-Type: application/json' \\\n  \
+            -d '{{\"query\": \"<brief description of your task>\", \"role\": \"{}\", \"task_type\": \"{}\"}}'\n\n\
+            This returns patterns from past work — solutions, gotchas, and recipes.\n\
+            Check for gotchas especially — they warn about known pitfalls.",
+            team.project_id,
+            slot.role,
+            issue.issue_type,
         ));
 
         // Build restrictions — compilation happens on the build server via merge queue
