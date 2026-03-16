@@ -228,14 +228,37 @@
 
   let expandedCategories: Record<string, boolean> = $state({});
 
-  // Chart computed values
+  // Chart dimensions and computed values
+  let chartPad = { top: 10, right: 10, bottom: 24, left: 36 };
+  let chartW = 600;
+  let chartH = 160;
+  let plotW = $derived(chartW - chartPad.left - chartPad.right);
+  let plotH = $derived(chartH - chartPad.top - chartPad.bottom);
   let maxTests = $derived(Math.max(...chartRuns.map(r => r.passed + r.failed + r.skipped), 1));
-  let chartW = 100;
-  let chartH = 40;
-  let chartStep = $derived(chartRuns.length > 1 ? chartW / (chartRuns.length - 1) : chartW);
-  let passPoints = $derived(chartRuns.map((r, i) => `${i * chartStep},${chartH - (r.passed / maxTests) * chartH}`).join(' '));
-  let failPoints = $derived(chartRuns.map((r, i) => `${i * chartStep},${chartH - (r.failed / maxTests) * chartH}`).join(' '));
   let hasFailures = $derived(chartRuns.some(r => r.failed > 0));
+
+  function chartX(i: number): number {
+    return chartPad.left + (chartRuns.length > 1 ? (i / (chartRuns.length - 1)) * plotW : plotW / 2);
+  }
+  function chartY(val: number): number {
+    return chartPad.top + plotH - (val / maxTests) * plotH;
+  }
+
+  let passLine = $derived(chartRuns.map((r, i) => `${chartX(i)},${chartY(r.passed)}`).join(' '));
+  let failLine = $derived(chartRuns.map((r, i) => `${chartX(i)},${chartY(r.failed)}`).join(' '));
+  let passArea = $derived(
+    chartRuns.map((r, i) => `${chartX(i)},${chartY(r.passed)}`).join(' ') +
+    ` ${chartX(chartRuns.length - 1)},${chartPad.top + plotH} ${chartX(0)},${chartPad.top + plotH}`
+  );
+
+  // Y-axis tick values
+  let yTicks = $derived(() => {
+    const ticks = [];
+    const step = Math.ceil(maxTests / 4);
+    for (let v = 0; v <= maxTests; v += step) ticks.push(v);
+    if (ticks[ticks.length - 1] < maxTests) ticks.push(maxTests);
+    return ticks;
+  });
 
   function toggleCategory(name: string) {
     expandedCategories[name] = !expandedCategories[name];
@@ -299,34 +322,62 @@
   <!-- Pass/Fail Trend Chart -->
   {#if chartRuns.length > 1}
     <div class="rounded-xl bg-gray-900 border border-gray-800 p-4">
-      <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Pass / Fail Trend</h3>
-      <svg viewBox="0 0 {chartW} {chartH + 8}" class="w-full h-24" preserveAspectRatio="none">
-        {#each [0, 0.25, 0.5, 0.75, 1] as pct}
-          <line x1="0" y1={chartH * (1 - pct)} x2={chartW} y2={chartH * (1 - pct)} stroke="rgb(55,65,81)" stroke-width="0.3" />
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pass / Fail Trend</h3>
+        <div class="flex items-center gap-4 text-[10px] text-gray-500">
+          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-green-500 inline-block"></span> Passed</span>
+          {#if hasFailures}
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span> Failed</span>
+          {/if}
+        </div>
+      </div>
+      <svg viewBox="0 0 {chartW} {chartH}" class="w-full" style="height: 160px;">
+        <!-- Y-axis grid + labels -->
+        {#each yTicks() as val}
+          <line
+            x1={chartPad.left} y1={chartY(val)}
+            x2={chartW - chartPad.right} y2={chartY(val)}
+            stroke="rgb(55,65,81)" stroke-width="0.5"
+          />
+          <text x={chartPad.left - 6} y={chartY(val) + 3.5} fill="rgb(107,114,128)" font-size="9" text-anchor="end">
+            {val}
+          </text>
         {/each}
 
-        <polyline fill="none" stroke="rgb(74,222,128)" stroke-width="1.5" points={passPoints} />
+        <!-- Pass area fill -->
+        <polygon points={passArea} fill="rgb(74,222,128)" fill-opacity="0.08" />
 
+        <!-- Pass line -->
+        <polyline fill="none" stroke="rgb(74,222,128)" stroke-width="2" stroke-linejoin="round" points={passLine} />
+
+        <!-- Fail line -->
         {#if hasFailures}
-          <polyline fill="none" stroke="rgb(248,113,113)" stroke-width="1.5" stroke-dasharray="2,2" points={failPoints} />
+          <polyline fill="none" stroke="rgb(248,113,113)" stroke-width="2" stroke-linejoin="round" stroke-dasharray="6,3" points={failLine} />
         {/if}
 
+        <!-- Data points -->
         {#each chartRuns as r, i}
-          <circle cx={i * chartStep} cy={chartH - (r.passed / maxTests) * chartH} r="1.5" fill={r.failed > 0 ? 'rgb(248,113,113)' : 'rgb(74,222,128)'} />
+          <circle
+            cx={chartX(i)} cy={chartY(r.passed)}
+            r="3.5"
+            fill={r.failed > 0 ? 'rgb(248,113,113)' : 'rgb(74,222,128)'}
+            stroke="rgb(17,24,39)" stroke-width="1.5"
+          />
         {/each}
 
+        <!-- X-axis time labels -->
         {#each chartRuns as r, i}
-          {#if i === 0 || i === chartRuns.length - 1 || i === Math.floor(chartRuns.length / 2)}
-            <text x={i * chartStep} y={chartH + 7} fill="rgb(107,114,128)" font-size="3" text-anchor={i === 0 ? 'start' : i === chartRuns.length - 1 ? 'end' : 'middle'}>
+          {#if chartRuns.length <= 6 || i === 0 || i === chartRuns.length - 1 || i % Math.max(1, Math.floor(chartRuns.length / 4)) === 0}
+            <text
+              x={chartX(i)} y={chartH - 4}
+              fill="rgb(107,114,128)" font-size="9"
+              text-anchor={i === 0 ? 'start' : i === chartRuns.length - 1 ? 'end' : 'middle'}
+            >
               {formatShortTime(r.created_at)}
             </text>
           {/if}
         {/each}
       </svg>
-      <div class="flex items-center gap-4 mt-2 text-[10px] text-gray-500">
-        <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-green-400 inline-block"></span> Passed</span>
-        <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-red-400 inline-block border-dashed"></span> Failed</span>
-      </div>
     </div>
   {/if}
 
