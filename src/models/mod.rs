@@ -23,3 +23,4 @@ pub mod team_role_override;
 pub mod code_graph;
 pub mod workflow_trace;
 pub mod dispatch_schedule;
+pub mod test_run;
