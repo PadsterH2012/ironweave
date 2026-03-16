@@ -623,6 +623,70 @@ impl OrchestratorRunner {
         tracing::debug!("Knowledge batch extraction completed");
     }
 
+    fn sweep_feature_promotions(&self) {
+        use crate::models::feature::Feature;
+        use crate::models::feature_task::FeatureTask;
+
+        let conn = self.db.lock().unwrap();
+
+        // 1. "designed" features where any task has an issue_id → promote to "in_progress"
+        let designed: Vec<Feature> = conn.prepare(
+            "SELECT f.* FROM features f WHERE f.status = 'designed' AND EXISTS (
+                SELECT 1 FROM feature_tasks ft WHERE ft.feature_id = f.id AND ft.issue_id IS NOT NULL
+            )"
+        ).and_then(|mut stmt| {
+            stmt.query_map([], Feature::from_row)
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        }).unwrap_or_default();
+
+        for feature in &designed {
+            if let Err(e) = Feature::update_status(&conn, &feature.id, "in_progress") {
+                tracing::warn!("Failed to promote feature {} to in_progress: {}", feature.id, e);
+            } else {
+                tracing::info!("Feature '{}' promoted to in_progress", feature.title);
+            }
+        }
+
+        // 2. "in_progress" features where all tasks are complete → promote to "implemented"
+        let in_progress: Vec<Feature> = conn.prepare(
+            "SELECT * FROM features WHERE status = 'in_progress'"
+        ).and_then(|mut stmt| {
+            stmt.query_map([], Feature::from_row)
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        }).unwrap_or_default();
+
+        for feature in &in_progress {
+            let tasks = FeatureTask::list_by_feature(&conn, &feature.id).unwrap_or_default();
+            if !tasks.is_empty() && FeatureTask::all_complete(&conn, &feature.id).unwrap_or(false) {
+                if let Err(e) = Feature::update_status(&conn, &feature.id, "implemented") {
+                    tracing::warn!("Failed to promote feature {} to implemented: {}", feature.id, e);
+                } else {
+                    tracing::info!("Feature '{}' auto-promoted to implemented (all tasks complete)", feature.title);
+                }
+            }
+        }
+
+        // 3. Check if any closed issues are linked to feature tasks → mark task as done
+        let pending_tasks: Vec<(String, String)> = conn.prepare(
+            "SELECT ft.id, ft.issue_id FROM feature_tasks ft
+             WHERE ft.status = 'todo' AND ft.issue_id IS NOT NULL"
+        ).and_then(|mut stmt| {
+            stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        }).unwrap_or_default();
+
+        for (task_id, issue_id) in &pending_tasks {
+            if let Ok(issue) = crate::models::issue::Issue::get_by_id(&conn, issue_id) {
+                if issue.status == "closed" {
+                    let _ = conn.execute(
+                        "UPDATE feature_tasks SET status = 'done' WHERE id = ?1",
+                        rusqlite::params![task_id],
+                    );
+                }
+            }
+        }
+    }
+
     // ── sweep (Task 10) ────────────────────────────────────────────
 
     async fn sweep(&mut self) {
@@ -685,6 +749,9 @@ impl OrchestratorRunner {
             self.extract_knowledge_batch();
             self.last_knowledge_extraction = std::time::Instant::now();
         }
+
+        // Feature auto-promotion
+        self.sweep_feature_promotions();
 
         // Remove completed/failed workflows from active map
         self.active_workflows
@@ -1961,6 +2028,31 @@ impl OrchestratorRunner {
             slot.role,
             issue.issue_type,
         ));
+
+        // Smart nudge: surface related parked features
+        {
+            let conn = self.db.lock().unwrap();
+            let issue_keywords = crate::models::knowledge_pattern::extract_keywords(
+                &format!("{} {}", issue.title, issue.description)
+            );
+            if let Ok(related) = crate::models::feature::Feature::find_related_parked(
+                &conn, &team.project_id, &issue_keywords, 0.5
+            ) {
+                if !related.is_empty() {
+                    let nudge_text = related.iter()
+                        .map(|f| format!("- {} (priority {}): {}", f.title, f.priority,
+                            if f.description.len() > 100 { &f.description[..100] } else { &f.description }))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    prompt_parts.push(format!(
+                        "\n## Related Parked Features\n\
+                        The following parked features may be related to your current task. \
+                        Consider whether your work could contribute to or enable these:\n\n{}\n",
+                        nudge_text
+                    ));
+                }
+            }
+        }
 
         // Build restrictions — compilation happens on the build server via merge queue
         prompt_parts.push(
