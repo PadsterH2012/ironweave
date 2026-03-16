@@ -128,23 +128,28 @@ impl Role {
     /// Seed the 17 predefined roles from the v2 design
     pub fn seed_defaults(conn: &Connection) -> Result<()> {
         let defaults = vec![
-            ("Coordinator", "Orchestration", "claude", "anthropic", Some("claude-opus-4-6"), 4, "Persistent agent — decomposes tasks, builds teams, routes models"),
-            ("Architect", "Engineering", "claude", "anthropic", Some("claude-opus-4-6"), 3, "System design, interfaces, structural decisions"),
-            ("Senior Coder", "Engineering", "claude", "anthropic", Some("claude-sonnet-4-6"), 2, "Feature implementation, bug fixes, production code"),
-            ("Code Reviewer", "Engineering", "claude", "anthropic", Some("claude-sonnet-4-6"), 3, "Code review for correctness, security, quality"),
-            ("DB Senior Engineer", "Engineering", "claude", "anthropic", Some("claude-sonnet-4-6"), 2, "Schema design, query optimisation, migrations"),
-            ("UI/UX Senior Coder", "Engineering", "claude", "anthropic", Some("claude-sonnet-4-6"), 2, "Frontend implementation, component development"),
-            ("Senior UX/UI Designer", "Design", "claude", "anthropic", Some("claude-sonnet-4-6"), 2, "User flows, wireframes, visual design"),
-            ("Brand Designer", "Design", "opencode", "openrouter", Some("mistral-large"), 2, "Visual identity, brand guidelines"),
-            ("Senior Tester", "Quality", "claude", "anthropic", Some("claude-sonnet-4-6"), 2, "Test design and implementation, QA"),
-            ("Security Engineer", "Security", "claude", "anthropic", Some("claude-sonnet-4-6"), 3, "Vulnerability audits, hardening, secure coding"),
-            ("DevOps Engineer", "Operations", "opencode", "openrouter", Some("deepseek-v3"), 2, "Deployments, CI/CD, system reliability"),
-            ("Infrastructure Engineer", "Operations", "opencode", "openrouter", Some("deepseek-v3"), 2, "Server provisioning, networking, monitoring"),
-            ("Researcher", "Research", "opencode", "openrouter", Some("claude-opus-4-6"), 2, "Technology evaluation, requirements gathering"),
-            ("Documentor", "Documentation", "opencode", "openrouter", Some("deepseek-v3"), 1, "Technical writing, API docs, guides"),
-            ("Marketing Manager", "Content", "opencode", "openrouter", Some("mistral-large"), 1, "Product messaging, campaigns, copy"),
-            ("Newsletter Writer", "Content", "opencode", "openrouter", Some("mistral-large"), 1, "Newsletter content, subscriber engagement"),
-            ("Office Monkey", "General", "opencode", "ollama", Some("llama-3.1-8b"), 1, "Ad-hoc tasks, filing, cleanup, simple transforms"),
+            // Tier 5 — Orchestration
+            ("Coordinator", "Orchestration", "claude", "anthropic", Some("claude-opus-4-6"), 5, "Persistent agent — decomposes tasks, builds teams, routes models"),
+            // Tier 4 — Architecture & Review
+            ("Architect", "Engineering", "claude", "anthropic", Some("claude-opus-4-6"), 4, "System design, interfaces, structural decisions"),
+            ("Code Reviewer", "Engineering", "opencode", "openrouter", Some("deepseek/deepseek-v3.2"), 4, "Code review for correctness, security, quality"),
+            // Tier 3 — Senior Engineering
+            ("Senior Coder", "Engineering", "opencode", "openrouter", Some("qwen/qwen3-coder"), 3, "Feature implementation, bug fixes, production code"),
+            ("DB Senior Engineer", "Engineering", "opencode", "openrouter", Some("deepseek/deepseek-v3.2"), 3, "Schema design, query optimisation, migrations"),
+            ("UI/UX Senior Coder", "Engineering", "opencode", "openrouter", Some("qwen/qwen3-coder-flash"), 3, "Frontend implementation, component development"),
+            ("Senior UX/UI Designer", "Design", "opencode", "openrouter", Some("minimax/minimax-m2.5"), 3, "User flows, wireframes, visual design"),
+            ("Brand Designer", "Design", "opencode", "openrouter", Some("minimax/minimax-m2.5"), 3, "Visual identity, brand guidelines"),
+            ("Senior Tester", "Quality", "opencode", "openrouter", Some("mistralai/devstral-small"), 3, "Test design and implementation, QA"),
+            ("Security Engineer", "Security", "opencode", "openrouter", Some("qwen/qwen3-coder"), 3, "Vulnerability audits, hardening, secure coding"),
+            // Tier 2 — Operations & Research
+            ("DevOps Engineer", "Operations", "opencode", "openrouter", Some("qwen/qwen3-235b-a22b-2507"), 2, "Deployments, CI/CD, system reliability"),
+            ("Infrastructure Engineer", "Operations", "opencode", "openrouter", Some("qwen/qwen3-235b-a22b-2507"), 2, "Server provisioning, networking, monitoring"),
+            ("Researcher", "Research", "opencode", "openrouter", Some("minimax/minimax-m2.5"), 2, "Technology evaluation, requirements gathering"),
+            // Tier 1 — Content & Simple Tasks
+            ("Documentor", "Documentation", "opencode", "openrouter", Some("qwen/qwen3.5-9b"), 1, "Technical writing, API docs, guides"),
+            ("Marketing Manager", "Content", "opencode", "openrouter", Some("qwen/qwen3.5-9b"), 1, "Product messaging, campaigns, copy"),
+            ("Newsletter Writer", "Content", "opencode", "openrouter", Some("qwen/qwen3.5-9b"), 1, "Newsletter content, subscriber engagement"),
+            ("Office Monkey", "General", "opencode", "openrouter", Some("qwen/qwen3-coder-30b-a3b-instruct"), 1, "Ad-hoc tasks, filing, cleanup, simple transforms"),
         ];
 
         for (name, cat, runtime, provider, model, tier, desc) in defaults {
@@ -179,7 +184,7 @@ mod tests {
 
         let coordinator = Role::get_by_name(&conn, "Coordinator").unwrap();
         assert_eq!(coordinator.category, "Orchestration");
-        assert_eq!(coordinator.min_model_tier, 4);
+        assert_eq!(coordinator.min_model_tier, 5);
         assert_eq!(coordinator.default_model, Some("claude-opus-4-6".to_string()));
     }
 
