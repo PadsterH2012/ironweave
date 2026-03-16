@@ -58,6 +58,7 @@ Last updated: 2026-03-16
   - [ ] Quality tab — `<QualitySlider />`
   - [ ] Routing tab — `<RoutingSuggestions />`
   - [ ] Coordinator tab — `<CoordinatorPanel />`
+  - [ ] Knowledge tab — `<KnowledgePanel />`
   - [ ] Tests tab — `<TestRunPanel />`
   - [ ] App Preview — start/stop/status
 
@@ -187,6 +188,17 @@ Last updated: 2026-03-16
 - [ ] Wake/sleep actions
 - [ ] Session ID tracking
 
+### KnowledgePanel.svelte
+- [ ] Pattern list with type badges (solution/gotcha/preference/recipe)
+- [ ] Filter by type and role
+- [ ] Add Pattern form (title, content, type, role, task_type, keywords)
+- [ ] Extract Now button
+- [ ] Pattern card with confidence bar, observations, source type
+- [ ] Expandable content detail
+- [ ] Delete pattern
+- [ ] Shared badge indicator
+- [ ] 30-second auto-refresh
+
 ### TestRunPanel.svelte
 - [ ] Run test buttons (E2E / Unit / Full)
 - [ ] Stop running test
@@ -272,6 +284,7 @@ Last updated: 2026-03-16
 - [ ] `dispatch` — status, pause, resume, projectStatus, projectPause, projectResume
 - [ ] `dispatch.schedules` — list, create, update, delete
 - [ ] `testRunner` — trigger, list, get, latest, stop
+- [ ] `knowledge` — list, get, create, search, crossProject, update, delete, extract
 
 ### TypeScript Interfaces
 - [ ] `AppStatus`
@@ -310,6 +323,7 @@ Last updated: 2026-03-16
 - [ ] `TeamRoleOverride`
 - [ ] `PerformanceLogEntry`, `ModelStats`
 - [ ] `TestRun`
+- [ ] `KnowledgePattern`, `CreateKnowledgePattern`, `KnowledgeSearchResult`
 
 ### Constants
 - [ ] `RUNTIME_MODELS` — model lists per runtime (claude, opencode, gemini)

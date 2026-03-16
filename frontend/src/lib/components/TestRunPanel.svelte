@@ -289,6 +289,7 @@
     { feature: 'API Contracts', tested: ['Health', 'All list endpoints', 'Project-scoped endpoints', '404 error handling', 'POST/PUT validation (400/422)', 'Invalid input rejection'], missing: [] },
     { feature: 'Files & Sync', tested: ['Files tab renders', 'Sync status bar', 'Breadcrumb nav', 'Directory navigation', 'Open file viewer', 'Sync trigger via API', 'History API', 'Status API', 'Diff API contract', 'Restore API contract'], missing: [] },
     { feature: 'App Preview', tested: ['App status API', 'Open App link in UI', 'App start API contract'], missing: [] },
+    { feature: 'Knowledge Graph', tested: ['Tab renders', 'Pattern list', 'Filter controls', 'Add Pattern form', 'Extract Now', 'API CRUD', 'Search API', 'Cross-project API'], missing: [] },
   ];
 
   let totalTested = $derived(featureCoverage.reduce((n, c) => n + c.tested.length, 0));

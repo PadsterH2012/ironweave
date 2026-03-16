@@ -243,6 +243,16 @@ Last updated: 2026-03-16
 - [ ] `GET /api/projects/{pid}/chokepoints` — `workflow_traces::list_chokepoints`
 - [ ] `POST /api/projects/{pid}/chokepoints/detect` — `workflow_traces::detect_chokepoints`
 
+### Knowledge Graph (src/api/knowledge.rs)
+- [ ] `GET /api/projects/{pid}/knowledge` — `knowledge::list_patterns`
+- [ ] `GET /api/projects/{pid}/knowledge/{id}` — `knowledge::get_pattern`
+- [ ] `POST /api/projects/{pid}/knowledge` — `knowledge::create_pattern`
+- [ ] `POST /api/projects/{pid}/knowledge/search` — `knowledge::search_patterns`
+- [ ] `POST /api/projects/{pid}/knowledge/extract` — `knowledge::trigger_extraction`
+- [ ] `PUT /api/projects/{pid}/knowledge/{id}` — `knowledge::update_pattern`
+- [ ] `DELETE /api/projects/{pid}/knowledge/{id}` — `knowledge::delete_pattern`
+- [ ] `GET /api/knowledge/cross-project` — `knowledge::cross_project_search`
+
 ### Cross-Project Learning (src/api/cross_project.rs)
 - [ ] `GET /api/cross-project/suggestions` — `cross_project::global_suggestions`
 - [ ] `GET /api/cross-project/opted-in` — `cross_project::list_opted_in`
@@ -280,6 +290,7 @@ Last updated: 2026-03-16
 - [ ] `cost_tracking.rs` — CostRecord, CostAggregate (token/cost tracking)
 - [ ] `dispatch_schedule.rs` — DispatchSchedule (cron-based killswitch schedules)
 - [ ] `issue.rs` — Issue, CreateIssue, UpdateIssue (task/issue management)
+- [ ] `knowledge_pattern.rs` — KnowledgePattern, hybrid search, keyword extraction
 - [ ] `loom.rs` — LoomEntry (agent activity narrative log)
 - [ ] `merge_queue.rs` — MergeQueueEntry (branch merge management)
 - [ ] `merge_queue_entry.rs` — MergeQueueEntry (alternate/extended)
