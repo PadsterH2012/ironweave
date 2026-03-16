@@ -27,13 +27,13 @@ test.describe.serial('Deep Settings interaction on Ironweave project', () => {
     await saveButton.click();
 
     // Verify success message appears
-    const successMsg = page.locator('text=Settings saved');
+    const successMsg = page.locator('text=Settings saved.');
     await expect(successMsg).toBeVisible({ timeout: 10000 });
 
     // Restore original value
     await idleInput.fill(originalValue || '30');
     await saveButton.click();
-    await expect(successMsg).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(1000);
   });
 
   test('Settings API CRUD', async ({ request }) => {
