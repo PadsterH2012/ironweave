@@ -675,6 +675,32 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_test_runs_status ON test_runs(status);
     ")?;
 
+    // ── Knowledge patterns table ─────────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS knowledge_patterns (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            pattern_type TEXT NOT NULL CHECK(pattern_type IN ('solution', 'gotcha', 'preference', 'recipe')),
+            role TEXT,
+            task_type TEXT,
+            keywords TEXT NOT NULL DEFAULT '[]',
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            confidence REAL NOT NULL DEFAULT 0.5,
+            observations INTEGER NOT NULL DEFAULT 1,
+            source_type TEXT NOT NULL CHECK(source_type IN ('trace', 'performance', 'loom', 'manual')),
+            source_id TEXT,
+            files_involved TEXT,
+            is_shared INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_project ON knowledge_patterns(project_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_type ON knowledge_patterns(pattern_type);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_role ON knowledge_patterns(role);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_shared ON knowledge_patterns(is_shared);
+    ")?;
+
     Ok(())
 }
 
@@ -885,5 +911,27 @@ mod tests {
             .query_row("SELECT status FROM test_runs WHERE id = 'tr1'", [], |row| row.get(0))
             .unwrap();
         assert_eq!(status, "pending");
+    }
+
+    #[test]
+    fn test_knowledge_patterns_table_exists() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO projects (id, name, directory, context) VALUES ('p1', 'proj', '/tmp', 'work')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO knowledge_patterns (id, project_id, pattern_type, title, content, source_type, keywords)
+             VALUES ('kp1', 'p1', 'solution', 'Test pattern', 'Test content', 'manual', '[]')",
+            [],
+        ).unwrap();
+
+        let pt: String = conn
+            .query_row("SELECT pattern_type FROM knowledge_patterns WHERE id = 'kp1'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(pt, "solution");
     }
 }
