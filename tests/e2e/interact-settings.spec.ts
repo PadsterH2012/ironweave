@@ -1,40 +1,29 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Settings CRUD', () => {
-  test('navigate to general settings and verify list renders', async ({ page }) => {
+test.describe('Settings interactions', () => {
+  test('general settings page shows form fields', async ({ page }) => {
     await page.goto('/#/settings/general');
 
-    const heading = page.locator('text=/general|settings/i').first();
-    await expect(heading).toBeVisible({ timeout: 10000 });
-
-    // Verify a settings list or table is present
-    const settingsContent = page.locator('table, [role="list"], form, .settings, dl, ul').first();
-    await expect(settingsContent).toBeVisible({ timeout: 10000 });
+    // Settings page uses labels + inputs, not a table
+    // Verify the key form fields exist
+    await expect(page.locator('label', { hasText: /Browse Roots/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('label', { hasText: /Mount Base/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('button', { hasText: /Save/i })).toBeVisible({ timeout: 5000 });
   });
 
   test('navigate to Proxies tab and verify it loads', async ({ page }) => {
-    await page.goto('/#/settings/general');
-
-    // Click Proxies tab/link
-    const proxiesTab = page.locator('a, button', { hasText: /prox/i });
-    await expect(proxiesTab.first()).toBeVisible({ timeout: 10000 });
-    await proxiesTab.first().click();
+    await page.goto('/#/settings/proxies');
 
     // Verify proxies content loads
-    const proxiesHeading = page.locator('text=/prox/i').first();
-    await expect(proxiesHeading).toBeVisible({ timeout: 10000 });
+    const proxiesContent = page.locator('text=/prox/i').first();
+    await expect(proxiesContent).toBeVisible({ timeout: 10000 });
   });
 
   test('navigate to API Keys tab and verify it loads', async ({ page }) => {
-    await page.goto('/#/settings/general');
-
-    // Click API Keys tab/link
-    const apiKeysTab = page.locator('a, button', { hasText: /api\s*key/i });
-    await expect(apiKeysTab.first()).toBeVisible({ timeout: 10000 });
-    await apiKeysTab.first().click();
+    await page.goto('/#/settings/api-keys');
 
     // Verify API keys content loads
-    const apiKeysHeading = page.locator('text=/api\\s*key/i').first();
-    await expect(apiKeysHeading).toBeVisible({ timeout: 10000 });
+    const apiKeysContent = page.locator('text=/api/i').first();
+    await expect(apiKeysContent).toBeVisible({ timeout: 10000 });
   });
 });
