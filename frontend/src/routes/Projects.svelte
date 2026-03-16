@@ -1,6 +1,6 @@
 <script lang="ts">
   import { push } from 'svelte-spa-router';
-  import { projects, mounts, proxyConfigs, type Project, type CreateProject, type ProxyConfigResponse } from '../lib/api';
+  import { projects, mounts, proxyConfigs, dispatch, type Project, type CreateProject, type ProxyConfigResponse } from '../lib/api';
   import DirectoryBrowser from '../lib/components/DirectoryBrowser.svelte';
 
   let projectList: Project[] = $state([]);
@@ -22,6 +22,32 @@
   let mountOptions: string = $state('');
   let proxyList: ProxyConfigResponse[] = $state([]);
   let selectedProxy: string = $state('');
+  let globalPaused: boolean = $state(false);
+  let togglingPause: Record<string, boolean> = $state({});
+
+  async function fetchGlobalPause() {
+    try {
+      const s = await dispatch.status();
+      globalPaused = s.paused;
+    } catch { /* ignore */ }
+  }
+
+  async function handleTogglePause(e: MouseEvent, project: Project) {
+    e.stopPropagation();
+    togglingPause[project.id] = true;
+    try {
+      if (project.is_paused) {
+        await dispatch.projectResume(project.id);
+      } else {
+        await dispatch.projectPause(project.id);
+      }
+      await fetchProjects();
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'Failed to toggle pause';
+    } finally {
+      togglingPause[project.id] = false;
+    }
+  }
 
   async function fetchProjects() {
     try {
@@ -41,6 +67,7 @@
   $effect(() => {
     fetchProjects();
     fetchProxies();
+    fetchGlobalPause();
   });
 
   async function handleCreate() {
@@ -318,10 +345,34 @@
           </p>
 
           <div class="flex items-center justify-between">
-            <span class="text-[10px] font-medium px-2 py-0.5 rounded-full {contextBadge(project.context)}">
-              {project.context}
-            </span>
-            <span class="text-xs text-gray-500">{formatDate(project.created_at)}</span>
+            <div class="flex items-center gap-1.5">
+              <span class="text-[10px] font-medium px-2 py-0.5 rounded-full {contextBadge(project.context)}">
+                {project.context}
+              </span>
+              {#if globalPaused}
+                <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-600/20 text-amber-400 border border-amber-600/30" title="Global pause active">
+                  Global Pause
+                </span>
+              {:else if project.is_paused}
+                <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-600/20 text-red-400 border border-red-600/30">
+                  Paused
+                </span>
+              {:else}
+                <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-green-600/20 text-green-400 border border-green-600/30">
+                  Active
+                </span>
+              {/if}
+            </div>
+            <button
+              onclick={(e) => handleTogglePause(e, project)}
+              disabled={togglingPause[project.id] || globalPaused}
+              class="text-[10px] font-medium px-2 py-0.5 rounded-full transition-colors {project.is_paused
+                ? 'bg-green-600/20 text-green-400 hover:bg-green-600/40 border border-green-600/30'
+                : 'bg-red-600/20 text-red-400 hover:bg-red-600/40 border border-red-600/30'} disabled:opacity-40 disabled:cursor-not-allowed"
+              title={globalPaused ? 'Global pause is active' : project.is_paused ? 'Resume dispatch' : 'Pause dispatch'}
+            >
+              {togglingPause[project.id] ? '...' : project.is_paused ? 'Resume' : 'Pause'}
+            </button>
           </div>
         </div>
       {/each}
