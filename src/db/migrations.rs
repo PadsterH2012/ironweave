@@ -649,6 +649,32 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         );
     ")?;
 
+    // ── Test runs table ──────────────────────────────────────────────
+    conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS test_runs (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending', 'running', 'passed', 'failed', 'error')),
+            test_type TEXT NOT NULL DEFAULT 'e2e'
+                CHECK(test_type IN ('e2e', 'unit', 'full')),
+            target_url TEXT,
+            total_tests INTEGER NOT NULL DEFAULT 0,
+            passed INTEGER NOT NULL DEFAULT 0,
+            failed INTEGER NOT NULL DEFAULT 0,
+            skipped INTEGER NOT NULL DEFAULT 0,
+            duration_seconds REAL,
+            output TEXT,
+            failed_tests TEXT DEFAULT '[]',
+            triggered_by TEXT NOT NULL DEFAULT 'manual'
+                CHECK(triggered_by IN ('manual', 'orchestrator', 'merge-queue')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_test_runs_project ON test_runs(project_id);
+        CREATE INDEX IF NOT EXISTS idx_test_runs_status ON test_runs(status);
+    ")?;
+
     Ok(())
 }
 
@@ -838,5 +864,26 @@ mod tests {
             .query_row("SELECT needs_intake FROM issues WHERE id = 'i1'", [], |row| row.get(0))
             .unwrap();
         assert_eq!(needs_intake, 1);
+    }
+
+    #[test]
+    fn test_test_runs_table_exists() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_migrations(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO projects (id, name, directory, context) VALUES ('p1', 'proj', '/tmp', 'work')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO test_runs (id, project_id, status, test_type, triggered_by) VALUES ('tr1', 'p1', 'pending', 'e2e', 'manual')",
+            [],
+        ).unwrap();
+
+        let status: String = conn
+            .query_row("SELECT status FROM test_runs WHERE id = 'tr1'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(status, "pending");
     }
 }
