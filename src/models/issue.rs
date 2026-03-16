@@ -705,6 +705,7 @@ mod tests {
             role: None,
             needs_intake: None,
             scope_mode: None,
+            depends_on: None,
         }).unwrap();
 
         assert_eq!(updated.status, "closed");
@@ -725,6 +726,7 @@ mod tests {
             role: None,
             needs_intake: None,
             scope_mode: None,
+            depends_on: None,
         });
         assert!(result.is_err());
     }
@@ -795,6 +797,7 @@ mod tests {
             role: Some("senior_coder".to_string()),
             needs_intake: None,
             scope_mode: None,
+            depends_on: None,
         }).unwrap();
         assert_eq!(updated.role.as_deref(), Some("senior_coder"));
     }
