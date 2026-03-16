@@ -24,7 +24,7 @@ test.describe('Team agent slot CRUD', () => {
   test('create, update, delete a slot', async ({ request }) => {
     // Create
     const createRes = await request.post(`${BASE}/api/teams/${teamId}/slots`, {
-      data: { role: 'Senior Tester', runtime: 'claude', slot_order: 99 },
+      data: { team_id: teamId, role: 'Senior Tester', runtime: 'claude', slot_order: 99 },
     });
     expect(createRes.status()).toBeLessThan(300);
     const slot = await createRes.json();

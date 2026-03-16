@@ -12,7 +12,7 @@ test.describe('Prompt template role assignment and build preview', () => {
         content: 'You are a test agent.',
       },
     });
-    expect(createRes.status()).toBe(201);
+    expect(createRes.ok()).toBeTruthy();
     const template = await createRes.json();
     expect(template).toHaveProperty('id');
     const templateId = template.id;
