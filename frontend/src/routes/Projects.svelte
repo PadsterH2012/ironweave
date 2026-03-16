@@ -1,6 +1,6 @@
 <script lang="ts">
   import { push } from 'svelte-spa-router';
-  import { projects, mounts, proxyConfigs, dispatch, type Project, type CreateProject, type ProxyConfigResponse } from '../lib/api';
+  import { projects, mounts, proxyConfigs, dispatch, testRunner, type Project, type CreateProject, type ProxyConfigResponse } from '../lib/api';
   import DirectoryBrowser from '../lib/components/DirectoryBrowser.svelte';
 
   let projectList: Project[] = $state([]);
@@ -24,6 +24,7 @@
   let selectedProxy: string = $state('');
   let globalPaused: boolean = $state(false);
   let togglingPause: Record<string, boolean> = $state({});
+  let runningTests: Record<string, string> = $state({});
 
   async function fetchGlobalPause() {
     try {
@@ -46,6 +47,30 @@
       error = err instanceof Error ? err.message : 'Failed to toggle pause';
     } finally {
       togglingPause[project.id] = false;
+    }
+  }
+
+  async function handleRunTests(e: MouseEvent, pid: string) {
+    e.stopPropagation();
+    runningTests[pid] = 'running';
+    runningTests = { ...runningTests };
+    try {
+      const run = await testRunner.trigger(pid, 'e2e');
+      const interval = setInterval(async () => {
+        try {
+          const updated = await testRunner.get(pid, run.id);
+          if (updated.status !== 'pending' && updated.status !== 'running') {
+            runningTests[pid] = updated.status;
+            runningTests = { ...runningTests };
+            clearInterval(interval);
+            setTimeout(() => { delete runningTests[pid]; runningTests = { ...runningTests }; }, 10000);
+          }
+        } catch { clearInterval(interval); delete runningTests[pid]; runningTests = { ...runningTests }; }
+      }, 3000);
+    } catch {
+      runningTests[pid] = 'error';
+      runningTests = { ...runningTests };
+      setTimeout(() => { delete runningTests[pid]; runningTests = { ...runningTests }; }, 5000);
     }
   }
 
@@ -363,16 +388,39 @@
                 </span>
               {/if}
             </div>
-            <button
-              onclick={(e) => handleTogglePause(e, project)}
-              disabled={togglingPause[project.id] || globalPaused}
-              class="text-[10px] font-medium px-2 py-0.5 rounded-full transition-colors {project.is_paused
-                ? 'bg-green-600/20 text-green-400 hover:bg-green-600/40 border border-green-600/30'
-                : 'bg-red-600/20 text-red-400 hover:bg-red-600/40 border border-red-600/30'} disabled:opacity-40 disabled:cursor-not-allowed"
-              title={globalPaused ? 'Global pause is active' : project.is_paused ? 'Resume dispatch' : 'Pause dispatch'}
-            >
-              {togglingPause[project.id] ? '...' : project.is_paused ? 'Resume' : 'Pause'}
-            </button>
+            <div class="flex items-center gap-1.5">
+              <button
+                onclick={(e) => handleRunTests(e, project.id)}
+                disabled={runningTests[project.id] === 'running'}
+                class="text-[10px] font-medium w-6 h-5 rounded transition-colors flex items-center justify-center {
+                  runningTests[project.id] === 'passed' ? 'bg-green-600/20 text-green-400 border border-green-600/30' :
+                  runningTests[project.id] === 'failed' ? 'bg-red-600/20 text-red-400 border border-red-600/30' :
+                  runningTests[project.id] === 'running' ? 'bg-blue-600/20 text-blue-400 border border-blue-600/30 animate-pulse' :
+                  'bg-gray-800 text-gray-400 hover:text-white border border-gray-700'
+                } disabled:cursor-not-allowed"
+                title="Run E2E tests"
+              >
+                {#if runningTests[project.id] === 'running'}
+                  ⟳
+                {:else if runningTests[project.id] === 'passed'}
+                  ✓
+                {:else if runningTests[project.id] === 'failed'}
+                  ✗
+                {:else}
+                  ▶
+                {/if}
+              </button>
+              <button
+                onclick={(e) => handleTogglePause(e, project)}
+                disabled={togglingPause[project.id] || globalPaused}
+                class="text-[10px] font-medium px-2 py-0.5 rounded-full transition-colors {project.is_paused
+                  ? 'bg-green-600/20 text-green-400 hover:bg-green-600/40 border border-green-600/30'
+                  : 'bg-red-600/20 text-red-400 hover:bg-red-600/40 border border-red-600/30'} disabled:opacity-40 disabled:cursor-not-allowed"
+                title={globalPaused ? 'Global pause is active' : project.is_paused ? 'Resume dispatch' : 'Pause dispatch'}
+              >
+                {togglingPause[project.id] ? '...' : project.is_paused ? 'Resume' : 'Pause'}
+              </button>
+            </div>
           </div>
         </div>
       {/each}

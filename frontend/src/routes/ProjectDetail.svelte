@@ -41,6 +41,7 @@
   import CoordinatorPanel from '../lib/components/CoordinatorPanel.svelte';
   import RoutingSuggestions from '../lib/components/RoutingSuggestions.svelte';
   import TeamRoleOverrides from '../lib/components/TeamRoleOverrides.svelte';
+  import TestRunPanel from '../lib/components/TestRunPanel.svelte';
 
   interface Props {
     params: { id: string };
@@ -113,6 +114,7 @@
     { key: 'costs', label: 'Costs' },
     { key: 'coordinator', label: 'Coordinator' },
     { key: 'routing', label: 'Routing' },
+    { key: 'tests', label: 'Tests' },
     { key: 'settings', label: 'Settings' },
   ]);
 
@@ -1134,6 +1136,8 @@
       <CoordinatorPanel projectId={params.id} />
     {:else if activeTab === 'routing'}
       <RoutingSuggestions projectId={params.id} />
+    {:else if activeTab === 'tests'}
+      <TestRunPanel projectId={params.id} />
     {:else if activeTab === 'settings'}
       <ProjectSettings {project} onUpdate={fetchProject} />
     {/if}
