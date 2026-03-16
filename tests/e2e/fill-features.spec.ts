@@ -121,3 +121,34 @@ test.describe('Features API contracts', () => {
     await request.delete(`${BASE}/api/projects/${PROJECT_ID}/features/${feature.id}`);
   });
 });
+
+test.describe('Feature gap analysis', () => {
+  test('GET /api/projects/{pid}/features/{id}/gaps returns analysis', async ({ request }) => {
+    // Create a feature with tasks
+    const fRes = await request.post(`${BASE}/api/projects/${PROJECT_ID}/features`, {
+      data: { project_id: PROJECT_ID, title: 'Gap Test Feature', description: 'Test' },
+    });
+    expect(fRes.ok()).toBeTruthy();
+    const feature = await fRes.json();
+
+    await request.post(`${BASE}/api/features/${feature.id}/tasks`, {
+      data: { feature_id: feature.id, title: 'database migrations' },
+    });
+    await request.post(`${BASE}/api/features/${feature.id}/tasks`, {
+      data: { feature_id: feature.id, title: 'nonexistent xyz module' },
+    });
+
+    // Run gap analysis
+    const gapRes = await request.get(`${BASE}/api/projects/${PROJECT_ID}/features/${feature.id}/gaps`);
+    expect(gapRes.ok()).toBeTruthy();
+    const gaps = await gapRes.json();
+    expect(gaps.total).toBe(2);
+    expect(gaps.results).toHaveLength(2);
+    expect(gaps.results[0]).toHaveProperty('status');
+    expect(gaps.results[0]).toHaveProperty('evidence');
+    expect(['found', 'partial', 'not_found']).toContain(gaps.results[0].status);
+
+    // Clean up
+    await request.delete(`${BASE}/api/projects/${PROJECT_ID}/features/${feature.id}`);
+  });
+});
