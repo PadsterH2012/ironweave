@@ -260,6 +260,42 @@
     return ticks;
   });
 
+  // ── Feature Coverage Matrix ───────────────────────────────────
+  // Maps each feature area to what's tested and what's missing
+  interface CoverageItem {
+    feature: string;
+    tested: string[];
+    missing: string[];
+  }
+
+  const featureCoverage: CoverageItem[] = [
+    { feature: 'Routes & Navigation', tested: ['All 11 routes render', 'Sidebar nav links', 'Backend health indicator'], missing: [] },
+    { feature: 'Dashboard', tested: ['Stat cards', 'KillSwitch widget', 'System health panel'], missing: ['Metrics chart interaction', 'Agent util chart', 'Merge health chart'] },
+    { feature: 'Projects', tested: ['List renders', 'Create project', 'Navigate to detail', 'Delete via API'], missing: ['Edit project inline', 'Mount selection'] },
+    { feature: 'Teams', tested: ['List renders', 'Create team', 'Mode selection', 'Delete via API'], missing: ['Agent slot CRUD', 'Activate/deactivate', 'Clone template'] },
+    { feature: 'Issues', tested: ['Board columns', 'Create issue', 'Delete via API'], missing: ['Drag between columns', 'Edit priority/role', 'Attachments upload', 'Parent/child hierarchy'] },
+    { feature: 'Workflows', tested: ['Tab renders', 'Create definition via API', 'Create instance via API'], missing: ['DAG visualization', 'Gate approvals', 'Pause/resume/cancel instance'] },
+    { feature: 'Merge Queue', tested: ['Tab renders'], missing: ['Approve/reject merge', 'Diff viewer', 'Conflict resolution'] },
+    { feature: 'Loom', tested: ['Feed renders'], missing: ['Entry type filtering', 'Auto-scroll behavior'] },
+    { feature: 'Mounts', tested: ['List renders', 'Create form fields', 'Cancel form'], missing: ['Mount/unmount action', 'SSH test connection', 'Remote browse'] },
+    { feature: 'Settings', tested: ['General form fields', 'Proxies tab', 'API Keys tab'], missing: ['Save settings', 'Proxy CRUD', 'Test connection'] },
+    { feature: 'Killswitch', tested: ['Dashboard toggle', 'Per-project pause/resume', 'Schedule visibility'], missing: ['Schedule CRUD', 'Cron expression validation'] },
+    { feature: 'Quality & Routing', tested: ['Quality tab renders', 'Routing tab renders', 'Detect patterns', 'Create override via API'], missing: ['Slider interaction', 'Accept/reject in UI', 'Team tier overrides'] },
+    { feature: 'Costs', tested: ['Cost dashboard renders'], missing: ['Daily spend chart', 'Aggregate trigger', 'Role/model breakdown'] },
+    { feature: 'Coordinator', tested: ['Panel renders', 'Wake/sleep toggle'], missing: [] },
+    { feature: 'Prompts', tested: ['Editor renders', 'Create template', 'Delete via API'], missing: ['Role assignment', 'Build prompt preview'] },
+    { feature: 'Test Runner', tested: ['Tab renders', 'Trigger run', 'Run detail panel', 'Quick-trigger button', 'History list'], missing: [] },
+    { feature: 'Agents', tested: ['Page renders', 'Empty state'], missing: ['Spawn agent', 'Stop agent', 'WebSocket terminal'] },
+    { feature: 'API Contracts', tested: ['Health', 'All list endpoints', 'Project-scoped endpoints', '404 error handling'], missing: ['POST/PUT validation', 'Auth 401 (disabled)'] },
+    { feature: 'Files & Sync', tested: ['Files tab renders'], missing: ['File browser nav', 'Sync trigger', 'Diff viewer', 'Restore snapshot'] },
+    { feature: 'App Preview', tested: [], missing: ['Start/stop app', 'Status polling', 'Port display'] },
+  ];
+
+  let totalTested = $derived(featureCoverage.reduce((n, c) => n + c.tested.length, 0));
+  let totalMissing = $derived(featureCoverage.reduce((n, c) => n + c.missing.length, 0));
+  let coveragePct = $derived(Math.round((totalTested / (totalTested + totalMissing)) * 100));
+  let showCoverageDetail: string | false = $state(false);
+
   function toggleCategory(name: string) {
     expandedCategories[name] = !expandedCategories[name];
     expandedCategories = { ...expandedCategories };
@@ -319,67 +355,90 @@
     <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-300">{error}</div>
   {/if}
 
-  <!-- Pass/Fail Trend Chart -->
-  {#if chartRuns.length > 1}
-    <div class="rounded-xl bg-gray-900 border border-gray-800 p-4">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pass / Fail Trend</h3>
-        <div class="flex items-center gap-4 text-[10px] text-gray-500">
-          <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-green-500 inline-block"></span> Passed</span>
-          {#if hasFailures}
-            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span> Failed</span>
-          {/if}
+  <!-- Chart + Coverage Row -->
+  <div class="grid grid-cols-3 gap-4">
+    <!-- Pass/Fail Trend Chart -->
+    {#if chartRuns.length > 1}
+      <div class="col-span-2 rounded-xl bg-gray-900 border border-gray-800 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pass / Fail Trend</h3>
+          <div class="flex items-center gap-4 text-[10px] text-gray-500">
+            <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-green-500 inline-block"></span> Passed</span>
+            {#if hasFailures}
+              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span> Failed</span>
+            {/if}
+          </div>
         </div>
+        <svg viewBox="0 0 {chartW} {chartH}" class="w-full" style="height: 160px;">
+          {#each yTicks() as val}
+            <line x1={chartPad.left} y1={chartY(val)} x2={chartW - chartPad.right} y2={chartY(val)} stroke="rgb(55,65,81)" stroke-width="0.5" />
+            <text x={chartPad.left - 6} y={chartY(val) + 3.5} fill="rgb(107,114,128)" font-size="9" text-anchor="end">{val}</text>
+          {/each}
+          <polygon points={passArea} fill="rgb(74,222,128)" fill-opacity="0.08" />
+          <polyline fill="none" stroke="rgb(74,222,128)" stroke-width="2" stroke-linejoin="round" points={passLine} />
+          {#if hasFailures}
+            <polyline fill="none" stroke="rgb(248,113,113)" stroke-width="2" stroke-linejoin="round" stroke-dasharray="6,3" points={failLine} />
+          {/if}
+          {#each chartRuns as r, i}
+            <circle cx={chartX(i)} cy={chartY(r.passed)} r="3.5" fill={r.failed > 0 ? 'rgb(248,113,113)' : 'rgb(74,222,128)'} stroke="rgb(17,24,39)" stroke-width="1.5" />
+          {/each}
+          {#each chartRuns as r, i}
+            {#if chartRuns.length <= 6 || i === 0 || i === chartRuns.length - 1 || i % Math.max(1, Math.floor(chartRuns.length / 4)) === 0}
+              <text x={chartX(i)} y={chartH - 4} fill="rgb(107,114,128)" font-size="9" text-anchor={i === 0 ? 'start' : i === chartRuns.length - 1 ? 'end' : 'middle'}>{formatShortTime(r.created_at)}</text>
+            {/if}
+          {/each}
+        </svg>
       </div>
-      <svg viewBox="0 0 {chartW} {chartH}" class="w-full" style="height: 160px;">
-        <!-- Y-axis grid + labels -->
-        {#each yTicks() as val}
-          <line
-            x1={chartPad.left} y1={chartY(val)}
-            x2={chartW - chartPad.right} y2={chartY(val)}
-            stroke="rgb(55,65,81)" stroke-width="0.5"
-          />
-          <text x={chartPad.left - 6} y={chartY(val) + 3.5} fill="rgb(107,114,128)" font-size="9" text-anchor="end">
-            {val}
-          </text>
-        {/each}
+    {/if}
 
-        <!-- Pass area fill -->
-        <polygon points={passArea} fill="rgb(74,222,128)" fill-opacity="0.08" />
+    <!-- Feature Coverage -->
+    <div class="{chartRuns.length > 1 ? 'col-span-1' : 'col-span-3'} rounded-xl bg-gray-900 border border-gray-800 p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Feature Coverage</h3>
+        <span class="text-xs font-bold {coveragePct >= 80 ? 'text-green-400' : coveragePct >= 50 ? 'text-yellow-400' : 'text-red-400'}">{coveragePct}%</span>
+      </div>
 
-        <!-- Pass line -->
-        <polyline fill="none" stroke="rgb(74,222,128)" stroke-width="2" stroke-linejoin="round" points={passLine} />
+      <!-- Coverage bar -->
+      <div class="w-full h-2 rounded-full bg-gray-800 mb-3">
+        <div
+          class="h-full rounded-full transition-all {coveragePct >= 80 ? 'bg-green-500' : coveragePct >= 50 ? 'bg-yellow-500' : 'bg-red-500'}"
+          style="width: {coveragePct}%"
+        ></div>
+      </div>
 
-        <!-- Fail line -->
-        {#if hasFailures}
-          <polyline fill="none" stroke="rgb(248,113,113)" stroke-width="2" stroke-linejoin="round" stroke-dasharray="6,3" points={failLine} />
-        {/if}
+      <div class="text-[10px] text-gray-500 mb-3">
+        {totalTested} tested · {totalMissing} missing
+      </div>
 
-        <!-- Data points -->
-        {#each chartRuns as r, i}
-          <circle
-            cx={chartX(i)} cy={chartY(r.passed)}
-            r="3.5"
-            fill={r.failed > 0 ? 'rgb(248,113,113)' : 'rgb(74,222,128)'}
-            stroke="rgb(17,24,39)" stroke-width="1.5"
-          />
-        {/each}
-
-        <!-- X-axis time labels -->
-        {#each chartRuns as r, i}
-          {#if chartRuns.length <= 6 || i === 0 || i === chartRuns.length - 1 || i % Math.max(1, Math.floor(chartRuns.length / 4)) === 0}
-            <text
-              x={chartX(i)} y={chartH - 4}
-              fill="rgb(107,114,128)" font-size="9"
-              text-anchor={i === 0 ? 'start' : i === chartRuns.length - 1 ? 'end' : 'middle'}
-            >
-              {formatShortTime(r.created_at)}
-            </text>
+      <!-- Feature list -->
+      <div class="space-y-1 max-h-[140px] overflow-y-auto">
+        {#each featureCoverage as item}
+          {@const pct = item.tested.length + item.missing.length > 0 ? Math.round((item.tested.length / (item.tested.length + item.missing.length)) * 100) : 0}
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="flex items-center justify-between py-1 px-2 rounded hover:bg-gray-800/60 cursor-pointer text-[10px]"
+            onclick={() => showCoverageDetail = showCoverageDetail === item.feature ? false : item.feature}
+          >
+            <span class="text-gray-300 truncate">{item.feature}</span>
+            <span class="shrink-0 ml-2 font-bold {item.missing.length === 0 ? 'text-green-400' : pct >= 50 ? 'text-yellow-400' : 'text-red-400'}">
+              {pct === 100 ? '✓' : `${pct}%`}
+            </span>
+          </div>
+          {#if showCoverageDetail === item.feature}
+            <div class="pl-4 pb-1 space-y-0.5">
+              {#each item.tested as t}
+                <div class="text-[9px] text-green-400/70">✓ {t}</div>
+              {/each}
+              {#each item.missing as m}
+                <div class="text-[9px] text-red-400/70">✗ {m}</div>
+              {/each}
+            </div>
           {/if}
         {/each}
-      </svg>
+      </div>
     </div>
-  {/if}
+  </div>
 
   <!-- Two-column grid -->
   <div class="grid grid-cols-3 gap-4">
