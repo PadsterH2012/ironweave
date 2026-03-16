@@ -64,8 +64,8 @@ test.describe('Tests tab and test runner', () => {
       expect(count).toBeGreaterThanOrEqual(1);
     }).toPass({ timeout: 15000, intervals: [3000] });
 
-    // Click a completed run (look for one with PASSED or FAILED status text)
-    const completedEntry = page.locator('button.w-full.text-left', { hasText: /PASSED|FAILED|ERROR/ }).first();
+    // Click a completed run (status text is lowercase in DOM, uppercase via CSS)
+    const completedEntry = page.locator('button.w-full.text-left', { hasText: /passed|failed|error/i }).first();
     await expect(completedEntry).toBeVisible({ timeout: 15000 });
     await completedEntry.click();
 
