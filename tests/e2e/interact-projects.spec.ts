@@ -11,18 +11,18 @@ test.describe.serial('Project CRUD', () => {
     await expect(createButton.first()).toBeVisible({ timeout: 10000 });
     await createButton.first().click();
 
-    // Fill in project name (find the Name input in the form)
-    const nameInput = page.locator('input[placeholder*="name" i]').first();
+    // Fill in project name (placeholder is "my-project")
+    const nameInput = page.locator('input[placeholder="my-project"]');
     await expect(nameInput).toBeVisible({ timeout: 5000 });
     await nameInput.fill(uniqueName);
 
-    // Fill in directory
-    const dirInput = page.locator('input[placeholder*="dir" i], input[placeholder*="path" i]').first();
+    // Fill in directory (placeholder is "/path/to/project")
+    const dirInput = page.locator('input[placeholder="/path/to/project"]');
     if (await dirInput.isVisible({ timeout: 3000 }).catch(() => false)) {
       await dirInput.fill('/tmp/e2e-test');
     }
 
-    // Submit the form (look for Create/Save button in the form area)
+    // Submit the form (the "Create" button inside the form)
     const submitButton = page.locator('button', { hasText: /^Create$/ });
     await expect(submitButton.first()).toBeVisible({ timeout: 5000 });
     await submitButton.first().click();
