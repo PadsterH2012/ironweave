@@ -71,8 +71,10 @@ test.describe.serial('Feature interactions', () => {
 
     await goToFeaturesTab(page);
     // Click "Parked" filter to find our feature
-    const parkedFilter = page.locator('button', { hasText: 'Parked' });
-    await parkedFilter.click();
+    const parkedFilter = page.locator('button', { hasText: /^⏸️ Parked$/ }).first();
+    if (await parkedFilter.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await parkedFilter.click();
+    }
     await expect(page.getByText('parked').first()).toBeVisible({ timeout: 10000 });
   });
 

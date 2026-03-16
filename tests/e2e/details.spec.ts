@@ -18,7 +18,7 @@ test.describe('Details tab – smoke tests', () => {
 
   test('Intent panel exists', async ({ page }) => {
     // Intent heading
-    await expect(page.getByText('Intent')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('h3', { hasText: /^Intent$/ }).first()).toBeVisible({ timeout: 10000 });
     // Textarea for intent content
     const textarea = page.locator('textarea[placeholder*="Describe what this project should be"]');
     await expect(textarea).toBeVisible({ timeout: 10000 });
