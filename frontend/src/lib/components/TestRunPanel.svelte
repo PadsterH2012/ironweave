@@ -287,7 +287,7 @@
     { feature: 'Test Runner', tested: ['Tab renders', 'Trigger run', 'Run detail panel', 'Quick-trigger button', 'History list'], missing: [] },
     { feature: 'Agents', tested: ['Page renders', 'Empty state'], missing: ['Spawn agent', 'Stop agent', 'WebSocket terminal'] },
     { feature: 'API Contracts', tested: ['Health', 'All list endpoints', 'Project-scoped endpoints', '404 error handling'], missing: ['POST/PUT validation', 'Auth 401 (disabled)'] },
-    { feature: 'Files & Sync', tested: ['Files tab renders'], missing: ['File browser nav', 'Sync trigger', 'Diff viewer', 'Restore snapshot'] },
+    { feature: 'Files & Sync', tested: ['Files tab renders', 'Sync status bar', 'Breadcrumb nav', 'Directory navigation', 'Open file viewer', 'Sync trigger via API', 'History API', 'Status API'], missing: ['Diff viewer', 'Restore snapshot'] },
     { feature: 'App Preview', tested: [], missing: ['Start/stop app', 'Status polling', 'Port display'] },
   ];
 
