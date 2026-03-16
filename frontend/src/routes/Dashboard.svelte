@@ -2,6 +2,7 @@
   import {
     dashboard,
     agents,
+    features as featuresApi,
     loom as loomApi,
     type AgentInfo,
     type DashboardStats,
@@ -10,6 +11,7 @@
     type MetricsResponse,
     type SystemHealth,
     type LoomEntry,
+    type FeatureSummary,
   } from '../lib/api';
   import { timeAgo } from '../lib/utils';
   import ActivityFeed from '../lib/components/ActivityFeed.svelte';
@@ -26,24 +28,27 @@
   let metricsData: MetricsResponse | null = $state(null);
   let healthData: SystemHealth | null = $state(null);
   let loomEntries: LoomEntry[] = $state([]);
+  let featureSummaries: FeatureSummary[] = $state([]);
   let error: string | null = $state(null);
   let metricsDays: number = $state(7);
 
   async function fetchAll() {
     try {
-      const [dashStats, agentIds, activity, metrics, system, loomData] = await Promise.all([
+      const [dashStats, agentIds, activity, metrics, system, loomData, featSummary] = await Promise.all([
         dashboard.stats(),
         agents.list(),
         dashboard.activity(50, 0),
         dashboard.metrics(metricsDays),
         dashboard.system(),
         loomApi.recent(50),
+        featuresApi.summary().catch(() => [] as FeatureSummary[]),
       ]);
       stats = dashStats;
       activityEntries = activity;
       metricsData = metrics;
       healthData = system;
       loomEntries = loomData;
+      featureSummaries = featSummary;
 
       agentSessions = agentIds;
       error = null;
@@ -80,6 +85,19 @@
       default: return 'bg-gray-400';
     }
   }
+
+  const featureTotals = $derived(() => {
+    let idea = 0, in_progress = 0, implemented = 0, verified = 0, parked = 0;
+    for (const s of featureSummaries) {
+      idea += s.idea;
+      in_progress += s.in_progress;
+      implemented += s.implemented;
+      verified += s.verified;
+      parked += s.parked;
+    }
+    const total = idea + in_progress + implemented + verified + parked;
+    return { idea, in_progress, implemented, verified, parked, total };
+  });
 
   const statCards = $derived([
     { label: 'Active Agents', value: stats?.active_agents ?? 0, accent: 'text-purple-400' },
@@ -121,6 +139,24 @@
       </div>
     {/each}
   </div>
+
+  <!-- Features Summary -->
+  {#if featureTotals().total > 0}
+    <div class="rounded-xl bg-gray-900 border border-gray-800 p-5">
+      <p class="text-sm text-gray-300">
+        Features:
+        <span class="text-gray-400 font-mono">{featureTotals().idea}</span> <span class="text-gray-500">ideas</span>
+        <span class="text-gray-700 mx-1">&middot;</span>
+        <span class="text-yellow-400 font-mono">{featureTotals().in_progress}</span> <span class="text-gray-500">in progress</span>
+        <span class="text-gray-700 mx-1">&middot;</span>
+        <span class="text-green-400 font-mono">{featureTotals().implemented}</span> <span class="text-gray-500">implemented</span>
+        <span class="text-gray-700 mx-1">&middot;</span>
+        <span class="text-purple-400 font-mono">{featureTotals().verified}</span> <span class="text-gray-500">verified</span>
+        <span class="text-gray-700 mx-1">&middot;</span>
+        <span class="text-amber-400 font-mono">{featureTotals().parked}</span> <span class="text-gray-500">parked</span>
+      </p>
+    </div>
+  {/if}
 
   <!-- Current Work -->
   {#if stats && stats.current_work.length > 0}

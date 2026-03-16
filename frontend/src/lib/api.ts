@@ -1184,3 +1184,106 @@ export const knowledge = {
   extract: (projectId: string) =>
     post<{ extracted: number }>(`/projects/${projectId}/knowledge/extract`, {}),
 };
+
+// ── Features ──────────────────────────────────────────────────────
+
+export interface Feature {
+  id: string;
+  project_id: string;
+  title: string;
+  description: string;
+  status: 'idea' | 'designed' | 'in_progress' | 'implemented' | 'verified' | 'parked' | 'abandoned';
+  prd_content: string | null;
+  implementation_notes: string | null;
+  parked_at: string | null;
+  parked_reason: string | null;
+  priority: number;
+  keywords: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateFeature {
+  title: string;
+  description?: string;
+  status?: string;
+  prd_content?: string;
+  priority?: number;
+  keywords?: string[];
+}
+
+export interface FeatureTask {
+  id: string;
+  feature_id: string;
+  title: string;
+  status: 'todo' | 'done' | 'skipped';
+  issue_id: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface FeatureWithTasks extends Feature {
+  tasks: FeatureTask[];
+}
+
+export interface FeatureSummary {
+  project_id: string;
+  project_name: string;
+  idea: number;
+  designed: number;
+  in_progress: number;
+  implemented: number;
+  verified: number;
+  parked: number;
+}
+
+export interface ProjectDocument {
+  id: string;
+  project_id: string;
+  doc_type: string;
+  content: string;
+  version: number;
+  previous_content: string | null;
+  updated_at: string;
+  updated_by: string;
+}
+
+export interface GapAnalysis {
+  missing: string[];
+  undocumented: string[];
+}
+
+export const features = {
+  list: (projectId: string, params?: { status?: string; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set('status', params.status);
+    if (params?.limit) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return get<Feature[]>(`/projects/${projectId}/features${qs ? `?${qs}` : ''}`);
+  },
+  get: (projectId: string, id: string) => get<FeatureWithTasks>(`/projects/${projectId}/features/${id}`),
+  create: (projectId: string, data: CreateFeature) => post<Feature>(`/projects/${projectId}/features`, data),
+  update: (projectId: string, id: string, data: Partial<Feature>) => put<Feature>(`/projects/${projectId}/features/${id}`, data),
+  delete: (projectId: string, id: string) => del(`/projects/${projectId}/features/${id}`),
+  park: (projectId: string, id: string, reason?: string) => post<Feature>(`/projects/${projectId}/features/${id}/park`, { reason }),
+  verify: (projectId: string, id: string) => post<Feature>(`/projects/${projectId}/features/${id}/verify`, {}),
+  import: (projectId: string, text: string) => post<Feature>(`/projects/${projectId}/features/import`, { text }),
+  summary: () => get<FeatureSummary[]>('/features/summary'),
+};
+
+export const featureTasks = {
+  list: (featureId: string) => get<FeatureTask[]>(`/features/${featureId}/tasks`),
+  create: (featureId: string, data: { title: string; sort_order?: number }) => post<FeatureTask>(`/features/${featureId}/tasks`, data),
+  update: (featureId: string, id: string, data: Partial<FeatureTask>) => put<FeatureTask>(`/features/${featureId}/tasks/${id}`, data),
+  delete: (featureId: string, id: string) => del(`/features/${featureId}/tasks/${id}`),
+  implement: (featureId: string, id: string) => post<any>(`/features/${featureId}/tasks/${id}/implement`, {}),
+};
+
+export const projectDocuments = {
+  get: (projectId: string, docType: string) => get<ProjectDocument>(`/projects/${projectId}/documents/${docType}`),
+  update: (projectId: string, docType: string, content: string, updatedBy?: string) =>
+    put<{ document: ProjectDocument; removals: string[] }>(`/projects/${projectId}/documents/${docType}`, { content, updated_by: updatedBy }),
+  history: (projectId: string, docType: string) => get<ProjectDocument>(`/projects/${projectId}/documents/${docType}/history`),
+  scan: (projectId: string) => post<{ status: string }>(`/projects/${projectId}/documents/scan`, {}),
+  gaps: (projectId: string) => get<GapAnalysis>(`/projects/${projectId}/documents/gaps`),
+};

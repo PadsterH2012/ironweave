@@ -43,6 +43,8 @@
   import TeamRoleOverrides from '../lib/components/TeamRoleOverrides.svelte';
   import KnowledgePanel from '../lib/components/KnowledgePanel.svelte';
   import TestRunPanel from '../lib/components/TestRunPanel.svelte';
+  import FeaturePanel from '../lib/components/FeaturePanel.svelte';
+  import ProjectDetailsPanel from '../lib/components/ProjectDetailsPanel.svelte';
 
   interface Props {
     params: { id: string };
@@ -54,7 +56,7 @@
   let workflowDefs: WorkflowDefinition[] = $state([]);
   let error: string | null = $state(null);
   let notFound: boolean = $state(false);
-  let activeTab: string = $state('teams');
+  let activeTab: string = $state('details');
   let loomEntries: LoomEntry[] = $state([]);
   let dispatchStatus: ProjectDispatchStatus | null = $state(null);
   let togglingDispatch: boolean = $state(false);
@@ -103,6 +105,8 @@
   const PICKUP_TYPES = ['task', 'bug', 'feature'];
 
   const tabs = $derived([
+    { key: 'details', label: 'Details' },
+    { key: 'features', label: 'Features' },
     { key: 'teams', label: 'Teams' },
     { key: 'issues', label: 'Issues' },
     { key: 'workflows', label: 'Workflows' },
@@ -711,7 +715,11 @@
     </div>
 
     <!-- Tab content -->
-    {#if activeTab === 'teams'}
+    {#if activeTab === 'details'}
+      <ProjectDetailsPanel projectId={params.id} />
+    {:else if activeTab === 'features'}
+      <FeaturePanel projectId={params.id} />
+    {:else if activeTab === 'teams'}
       <div class="space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="text-lg font-semibold text-white">Teams</h2>
