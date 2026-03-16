@@ -36,6 +36,7 @@ Last updated: 2026-03-16
 - [ ] Per-project status badges: green "Active", red "Paused", amber "Global Pause"
 - [ ] Per-project Pause/Resume toggle button
 - [ ] Button disabled when global override active
+- [ ] Quick-trigger E2E test button per project tile (play icon with status)
 - [ ] `fetchGlobalPause()` state management
 - [ ] `handleTogglePause()` per project
 
@@ -57,6 +58,7 @@ Last updated: 2026-03-16
   - [ ] Quality tab — `<QualitySlider />`
   - [ ] Routing tab — `<RoutingSuggestions />`
   - [ ] Coordinator tab — `<CoordinatorPanel />`
+  - [ ] Tests tab — `<TestRunPanel />`
   - [ ] App Preview — start/stop/status
 
 ### Workflow View (WorkflowView.svelte) — `/#/projects/:id/workflows/:wid`
@@ -185,6 +187,16 @@ Last updated: 2026-03-16
 - [ ] Wake/sleep actions
 - [ ] Session ID tracking
 
+### TestRunPanel.svelte
+- [ ] Run test buttons (E2E / Unit / Full)
+- [ ] Stop running test
+- [ ] Test run history list (scrollable)
+- [ ] Run detail panel (status, pass/fail/skip, duration)
+- [ ] Failed test names display
+- [ ] Collapsible full output viewer
+- [ ] 3-second polling during active runs
+- [ ] 15-second auto-refresh for run history
+
 ### TeamRoleOverrides.svelte
 - [ ] Per-role runtime/model override controls
 - [ ] Set/clear overrides per team
@@ -259,6 +271,7 @@ Last updated: 2026-03-16
 - [ ] `performanceLog` — list, stats
 - [ ] `dispatch` — status, pause, resume, projectStatus, projectPause, projectResume
 - [ ] `dispatch.schedules` — list, create, update, delete
+- [ ] `testRunner` — trigger, list, get, latest, stop
 
 ### TypeScript Interfaces
 - [ ] `AppStatus`
@@ -296,6 +309,7 @@ Last updated: 2026-03-16
 - [ ] `RoutingOverride`
 - [ ] `TeamRoleOverride`
 - [ ] `PerformanceLogEntry`, `ModelStats`
+- [ ] `TestRun`
 
 ### Constants
 - [ ] `RUNTIME_MODELS` — model lists per runtime (claude, opencode, gemini)

@@ -248,6 +248,13 @@ Last updated: 2026-03-16
 - [ ] `GET /api/cross-project/opted-in` — `cross_project::list_opted_in`
 - [ ] `POST /api/projects/{pid}/share-learning` — `cross_project::toggle_sharing`
 
+### Test Runner (src/api/tests.rs)
+- [ ] `POST /api/projects/{pid}/tests/run` — `tests::trigger_run`
+- [ ] `GET /api/projects/{pid}/tests/runs` — `tests::list_runs`
+- [ ] `GET /api/projects/{pid}/tests/runs/{id}` — `tests::get_run`
+- [ ] `GET /api/projects/{pid}/tests/latest` — `tests::latest_run`
+- [ ] `POST /api/projects/{pid}/tests/runs/{id}/stop` — `tests::stop_run`
+
 ### Dispatch Killswitch (src/api/dispatch.rs)
 - [ ] `POST /api/dispatch/pause` — `dispatch::global_pause`
 - [ ] `POST /api/dispatch/resume` — `dispatch::global_resume`
@@ -281,6 +288,7 @@ Last updated: 2026-03-16
 - [ ] `project.rs` — Project (with pause fields: `is_paused`, `paused_at`, `pause_reason`)
 - [ ] `project_app.rs` — ProjectApp (app preview state)
 - [ ] `prompt_template.rs` — PromptTemplate, PromptTemplateAssignment
+- [ ] `test_run.rs` — TestRun, CreateTestRun (Playwright test execution results)
 - [ ] `proxy_config.rs` — ProxyConfig, ProxyHop (SSH proxy chains)
 - [ ] `quality.rs` — QualityTier, TierRange (model quality tiers)
 - [ ] `role.rs` — Role (global role registry with seed defaults)
