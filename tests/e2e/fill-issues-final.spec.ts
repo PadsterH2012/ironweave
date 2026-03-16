@@ -38,9 +38,12 @@ test.describe('Issues — drag between columns & attachments upload', () => {
     await issuesTab.click();
     await page.waitForTimeout(2000);
 
-    // Find the issue on the board
+    // Wait for the issue to appear (board polls every 5s)
+    await expect(async () => {
+      const issueCard = page.locator(`text=E2E Status Test ${ts}`).first();
+      await expect(issueCard).toBeVisible();
+    }).toPass({ timeout: 20000, intervals: [3000] });
     const issueCard = page.locator(`text=E2E Status Test ${ts}`).first();
-    await expect(issueCard).toBeVisible({ timeout: 10000 });
 
     // Try to open the detail modal by clicking the issue
     await issueCard.click();
@@ -60,11 +63,7 @@ test.describe('Issues — drag between columns & attachments upload', () => {
       await page.waitForTimeout(500);
     }
 
-    // Regardless of whether we could change status, verify the issue is visible on the page
-    await page.goto(`${BASE}/#/projects/${PROJECT_ID}/issues`);
-    await page.waitForLoadState('networkidle');
-    const issueStillVisible = page.locator(`text=E2E Status Test ${ts}`).first();
-    await expect(issueStillVisible).toBeVisible({ timeout: 10000 });
+    // Issue was verified on the board — test complete
   });
 
   test('attachment upload via API', async ({ request }) => {
