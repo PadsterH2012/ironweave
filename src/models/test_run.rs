@@ -191,7 +191,7 @@ mod tests {
         // Ensure second run has a later created_at
         conn.execute(
             "UPDATE test_runs SET created_at = datetime('now', '+1 second') WHERE id = ?1",
-            params![],
+            params![run1.id],
         ).ok();
 
         let input2 = CreateTestRun {

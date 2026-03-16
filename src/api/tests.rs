@@ -84,28 +84,10 @@ pub async fn trigger_run(
                         let skipped_count = stats["skipped"].as_i64().unwrap_or(0);
                         let total_count = expected + unexpected + skipped_count;
 
-                        // Collect failed test names
+                        // Collect failed test names (recursing into nested suites)
                         let mut failed_names: Vec<String> = Vec::new();
                         if let Some(suites) = json["suites"].as_array() {
-                            for suite in suites {
-                                if let Some(specs) = suite["specs"].as_array() {
-                                    for spec in specs {
-                                        if let Some(tests) = spec["tests"].as_array() {
-                                            for test in tests {
-                                                if let Some(results) = test["results"].as_array() {
-                                                    for r in results {
-                                                        if r["status"].as_str() == Some("failed") {
-                                                            if let Some(title) = spec["title"].as_str() {
-                                                                failed_names.push(title.to_string());
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            collect_failed_tests(suites, &mut failed_names);
                         }
 
                         let status_str = if unexpected > 0 { "failed" } else { "passed" };
@@ -191,4 +173,32 @@ pub async fn stop_run(
     TestRun::update_status(&conn, &id, "error")
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(|_| StatusCode::NOT_FOUND)
+}
+
+/// Recursively walk Playwright JSON suites to collect failed test names.
+fn collect_failed_tests(suites: &[serde_json::Value], names: &mut Vec<String>) {
+    for suite in suites {
+        // Check specs at this level
+        if let Some(specs) = suite["specs"].as_array() {
+            for spec in specs {
+                if let Some(tests) = spec["tests"].as_array() {
+                    for test in tests {
+                        if let Some(results) = test["results"].as_array() {
+                            for r in results {
+                                if r["status"].as_str() == Some("failed") {
+                                    if let Some(title) = spec["title"].as_str() {
+                                        names.push(title.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Recurse into nested suites
+        if let Some(sub_suites) = suite["suites"].as_array() {
+            collect_failed_tests(sub_suites, names);
+        }
+    }
 }
