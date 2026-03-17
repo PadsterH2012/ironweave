@@ -304,7 +304,7 @@ impl Issue {
         Ok(ready)
     }
 
-    const VALID_STATUSES: &'static [&'static str] = &["open", "in_progress", "review", "closed"];
+    const VALID_STATUSES: &'static [&'static str] = &["open", "in_progress", "review", "closed", "backlog", "on_hold"];
 
     pub fn update(conn: &Connection, id: &str, input: &UpdateIssue) -> Result<Self> {
         let mut sets = Vec::new();
