@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-const BASE = process.env.BASE_URL || 'https://hl-ironweave-dev.techpad.uk';
+import { BASE } from './test-helpers';
 
 test.describe('Prompt template role assignment and build preview', () => {
   test('create template, assign to role, build prompt, then clean up', async ({ request }) => {

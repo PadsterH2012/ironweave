@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { getTestEnv, BASE } from './test-helpers';
 
-const BASE = process.env.BASE_URL || 'https://hl-ironweave-dev.techpad.uk';
-const PROJECT_ID = '1d91326e-262a-40d0-980e-d727be5e6e66';
+const { PROJECT_ID, TEAM_ID } = getTestEnv();
 
 test.describe('API error handling', () => {
   test('invalid project ID returns 404', async ({ request }) => {

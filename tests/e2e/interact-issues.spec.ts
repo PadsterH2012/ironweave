@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { BASE } from './test-helpers';
 
 const issueTitle = `E2E Test Issue ${Date.now()}`;
 
@@ -54,7 +55,7 @@ test.describe.serial('Issue CRUD on Ironweave project', () => {
 
   test('delete the test issue via API', async ({ request }) => {
     // Use API to clean up — more reliable than UI deletion
-    const BASE = process.env.BASE_URL || 'https://hl-ironweave-dev.techpad.uk';
+    // BASE imported from test-helpers
     const projectsRes = await request.get(`${BASE}/api/projects`);
     const projects = await projectsRes.json();
     const pid = projects[0]?.id;

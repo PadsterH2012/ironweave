@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-const BASE = process.env.BASE_URL || 'https://hl-ironweave-dev.techpad.uk';
+import { BASE } from './test-helpers';
 
 test.describe('Agents spawn & WebSocket terminal', () => {
   test('spawn agent API contract', async ({ request }) => {

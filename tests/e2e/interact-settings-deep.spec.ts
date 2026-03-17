@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-const BASE = process.env.BASE_URL || 'https://hl-ironweave-dev.techpad.uk';
+import { BASE } from './test-helpers';
 
 test.describe.serial('Deep Settings interaction on Ironweave project', () => {
   test('Save general settings', async ({ page }) => {

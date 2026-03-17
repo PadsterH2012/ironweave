@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { BASE } from './test-helpers';
 
 const uniqueName = `E2E Test Project ${Date.now()}`;
 
@@ -48,7 +49,7 @@ test.describe.serial('Project CRUD', () => {
 
   test('delete the test project via API', async ({ request }) => {
     // Clean up via API — more reliable than UI delete
-    const BASE = process.env.BASE_URL || 'https://hl-ironweave-dev.techpad.uk';
+    // BASE imported from test-helpers
     const projectsRes = await request.get(`${BASE}/api/projects`);
     const projects = await projectsRes.json();
     const testProject = projects.find((p: any) => p.name === uniqueName);

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { BASE as ROOT_BASE } from './test-helpers';
 
-const BASE = (process.env.BASE_URL || 'https://hl-ironweave-dev.techpad.uk') + '/api';
+const BASE = ROOT_BASE + '/api';
 
 // Helper: get or create a project + team for testing
 async function getTestProjectAndTeam(request: any) {

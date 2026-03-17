@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-const BASE = process.env.BASE_URL || 'https://hl-ironweave-dev.techpad.uk';
+import { BASE } from './test-helpers';
 
 test.describe.serial('Deep Mounts interaction on Ironweave project', () => {
   test('Mount list with status indicators', async ({ page }) => {

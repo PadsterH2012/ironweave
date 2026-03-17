@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-const BASE = process.env.BASE_URL || 'https://hl-ironweave-dev.techpad.uk';
+import { BASE } from './test-helpers';
 
 test.describe('KillSwitch interactions', () => {
   test('global toggle on dashboard: toggle and restore', async ({ page, request }) => {
