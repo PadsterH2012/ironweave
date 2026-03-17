@@ -162,7 +162,7 @@
     );
 
     try {
-      await issues.updateStatus(draggedIssueId, targetStatus);
+      await issues.updateStatus(projectId, draggedIssueId, targetStatus);
     } catch (e) {
       console.error('Failed to update issue status:', e);
       await fetchIssues();
