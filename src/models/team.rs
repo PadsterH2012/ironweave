@@ -43,6 +43,7 @@ pub struct TeamAgentSlot {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateTeamAgentSlot {
+    #[serde(default)]
     pub team_id: String,
     pub role: String,
     pub runtime: String,
