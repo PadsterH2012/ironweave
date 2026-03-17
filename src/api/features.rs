@@ -18,10 +18,65 @@ pub struct FeatureListQuery {
 }
 
 #[derive(Serialize)]
+pub struct FeatureGapInfo {
+    pub gap_issue_id: Option<String>,
+    pub gap_status: Option<String>,
+    pub gap_found: i64,
+    pub gap_partial: i64,
+    pub gap_not_found: i64,
+    pub gap_total: i64,
+    pub gap_summary: Option<String>,
+}
+
+fn get_gap_info(conn: &rusqlite::Connection, feature: &Feature) -> FeatureGapInfo {
+    let Some(ref gap_id) = feature.gap_issue_id else {
+        return FeatureGapInfo { gap_issue_id: None, gap_status: None, gap_found: 0, gap_partial: 0, gap_not_found: 0, gap_total: 0, gap_summary: None };
+    };
+
+    let issue = crate::models::issue::Issue::get_by_id(conn, gap_id).ok();
+    match issue {
+        Some(issue) if issue.status == "closed" => {
+            let summary = issue.summary.unwrap_or_default();
+            let found = summary.matches("\u{2713}").count() as i64;
+            let partial = summary.matches("\u{25d0}").count() as i64;
+            let not_found = summary.matches("\u{2717}").count() as i64;
+            let total = found + partial + not_found;
+            FeatureGapInfo {
+                gap_issue_id: Some(gap_id.clone()),
+                gap_status: Some("complete".into()),
+                gap_found: found, gap_partial: partial, gap_not_found: not_found, gap_total: total,
+                gap_summary: Some(summary),
+            }
+        }
+        Some(_) => {
+            FeatureGapInfo {
+                gap_issue_id: Some(gap_id.clone()),
+                gap_status: Some("pending".into()),
+                gap_found: 0, gap_partial: 0, gap_not_found: 0, gap_total: 0,
+                gap_summary: None,
+            }
+        }
+        None => {
+            FeatureGapInfo { gap_issue_id: None, gap_status: None, gap_found: 0, gap_partial: 0, gap_not_found: 0, gap_total: 0, gap_summary: None }
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct FeatureListItem {
+    #[serde(flatten)]
+    pub feature: Feature,
+    pub gap_not_found: i64,
+    pub gap_status: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct FeatureWithTasks {
     #[serde(flatten)]
     pub feature: Feature,
     pub tasks: Vec<FeatureTask>,
+    #[serde(flatten)]
+    pub gap: FeatureGapInfo,
 }
 
 #[derive(Deserialize)]
@@ -42,12 +97,20 @@ pub async fn list_features(
     Path(pid): Path<String>,
     Query(params): Query<FeatureListQuery>,
     State(state): State<AppState>,
-) -> Result<Json<Vec<Feature>>, StatusCode> {
+) -> Result<Json<Vec<FeatureListItem>>, StatusCode> {
     let conn = state.conn()?;
     let limit = params.limit.unwrap_or(100);
-    Feature::list_by_project(&conn, &pid, params.status.as_deref(), limit)
-        .map(Json)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    let features_list = Feature::list_by_project(&conn, &pid, params.status.as_deref(), limit)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let enriched: Vec<FeatureListItem> = features_list.iter().map(|f| {
+        let gap = get_gap_info(&conn, f);
+        FeatureListItem {
+            feature: f.clone(),
+            gap_not_found: gap.gap_not_found,
+            gap_status: gap.gap_status,
+        }
+    }).collect();
+    Ok(Json(enriched))
 }
 
 /// Get a single feature with its tasks
@@ -60,7 +123,8 @@ pub async fn get_feature(
         .map_err(|_| StatusCode::NOT_FOUND)?;
     let tasks = FeatureTask::list_by_feature(&conn, &id)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(FeatureWithTasks { feature, tasks }))
+    let gap = get_gap_info(&conn, &feature);
+    Ok(Json(FeatureWithTasks { feature, tasks, gap }))
 }
 
 /// Create a feature
@@ -178,7 +242,8 @@ pub async fn import_prd(
         tasks.push(task);
     }
 
-    Ok((StatusCode::CREATED, Json(FeatureWithTasks { feature, tasks })))
+    let gap = get_gap_info(&conn, &feature);
+    Ok((StatusCode::CREATED, Json(FeatureWithTasks { feature, tasks, gap })))
 }
 
 /// Get feature summary across all projects
@@ -328,7 +393,7 @@ X found, Y partial, Z not found out of N total"#,
         }).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
 
-    // Now update the description with the real issue ID
+    // Now update the description with the real issue ID and link gap issue to feature
     {
         let conn = state.conn()?;
         let updated_description = prompt_template.replace("{{ISSUE_ID}}", &issue.id);
@@ -337,6 +402,12 @@ X found, Y partial, Z not found out of N total"#,
             ..Default::default()
         };
         let _ = Issue::update(&conn, &issue.id, &update);
+
+        // Link gap analysis issue to the feature
+        conn.execute(
+            "UPDATE features SET gap_issue_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![issue.id, fid],
+        ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
     Ok(Json(GapAnalysisTriggered {

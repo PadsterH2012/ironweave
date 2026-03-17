@@ -391,6 +391,15 @@
               {feature.status.replace('_', ' ')}
             </span>
             <span class="flex-1 text-sm font-semibold text-gray-200 truncate">{feature.title}</span>
+            {#if feature.gap_status === 'complete'}
+              <span class="text-[10px] font-bold px-1.5 py-0.5 rounded {feature.gap_not_found === 0 ? 'bg-green-600/20 text-green-400' : 'bg-red-600/20 text-red-400'}">
+                GA:{feature.gap_not_found}
+              </span>
+            {:else if feature.gap_status === 'pending'}
+              <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-600/20 text-blue-400 animate-pulse">
+                GA:...
+              </span>
+            {/if}
             <span class="text-xs font-mono px-2 py-0.5 rounded bg-gray-800 text-gray-400">P{feature.priority}</span>
             {#if featureTasksMap[feature.id]}
               {@const prog = taskProgress(feature.id)}
@@ -424,6 +433,16 @@
                     PRD Content
                   </summary>
                   <pre class="mt-2 text-sm text-gray-300 bg-gray-950 rounded-lg p-3 overflow-auto max-h-64 font-mono whitespace-pre-wrap">{selectedFeature.prd_content}</pre>
+                </details>
+              {/if}
+
+              <!-- Gap Analysis Results (from enriched get endpoint) -->
+              {#if selectedFeature.gap_summary}
+                <details class="group">
+                  <summary class="text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-300">
+                    Gap Analysis — {selectedFeature.gap_found} found · {selectedFeature.gap_partial} partial · {selectedFeature.gap_not_found} missing
+                  </summary>
+                  <pre class="mt-2 text-xs text-gray-300 bg-gray-950 rounded-lg p-3 overflow-auto max-h-64 whitespace-pre-wrap">{selectedFeature.gap_summary}</pre>
                 </details>
               {/if}
 

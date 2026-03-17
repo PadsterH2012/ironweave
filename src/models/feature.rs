@@ -17,6 +17,7 @@ pub struct Feature {
     pub parked_reason: Option<String>,
     pub priority: i64,
     pub keywords: String,
+    pub gap_issue_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -69,6 +70,7 @@ impl Feature {
             parked_reason: row.get("parked_reason")?,
             priority: row.get("priority")?,
             keywords: row.get("keywords")?,
+            gap_issue_id: row.get("gap_issue_id").ok(),
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })

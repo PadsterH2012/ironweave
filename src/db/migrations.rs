@@ -753,6 +753,9 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_project_documents_unique ON project_documents(project_id, doc_type);
     ")?;
 
+    // ── Add gap_issue_id to features ─────────────────────────────────
+    migrate_alter(conn, "ALTER TABLE features ADD COLUMN gap_issue_id TEXT");
+
     // ── Add backlog + on_hold statuses to issues ─────────────────────
     // Check if the constraint already includes 'backlog'
     let needs_issue_status_migration = {

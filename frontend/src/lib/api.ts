@@ -1199,6 +1199,9 @@ export interface Feature {
   parked_reason: string | null;
   priority: number;
   keywords: string;
+  gap_issue_id: string | null;
+  gap_not_found: number;
+  gap_status: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1224,6 +1227,12 @@ export interface FeatureTask {
 
 export interface FeatureWithTasks extends Feature {
   tasks: FeatureTask[];
+  gap_found: number;
+  gap_partial: number;
+  gap_not_found: number;
+  gap_total: number;
+  gap_summary: string | null;
+  gap_status: string | null;
 }
 
 export interface FeatureSummary {
