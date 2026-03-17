@@ -39,6 +39,10 @@
   let analyzingGaps: Record<string, boolean> = $state({});
   let gapResults: Record<string, any> = $state({});
 
+  // Plan generation
+  let planningFeature: Record<string, boolean> = $state({});
+  let planResults: Record<string, any> = $state({});
+
   const statusFilters = [
     { key: '', label: 'All' },
     { key: 'idea', label: 'Ideas', icon: '💭' },
@@ -214,6 +218,21 @@
     } finally {
       analyzingGaps[featureId] = false;
       analyzingGaps = { ...analyzingGaps };
+    }
+  }
+
+  async function generatePlan(featureId: string) {
+    planningFeature[featureId] = true;
+    planningFeature = { ...planningFeature };
+    try {
+      const result = await features.plan(projectId, featureId);
+      planResults[featureId] = result;
+      planResults = { ...planResults };
+    } catch (e) {
+      error = 'Failed to dispatch planning agent';
+    } finally {
+      planningFeature[featureId] = false;
+      planningFeature = { ...planningFeature };
     }
   }
 
@@ -477,12 +496,28 @@
                 >
                   {analyzingGaps[feature.id] ? 'Dispatching...' : 'Request Gap Analysis'}
                 </button>
+                <button
+                  onclick={() => generatePlan(feature.id)}
+                  disabled={planningFeature[feature.id]}
+                  class="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 hover:bg-purple-500 text-white transition-colors disabled:opacity-50"
+                >
+                  {planningFeature[feature.id] ? 'Planning...' : 'Generate Plan'}
+                </button>
               </div>
 
               <!-- Gap Analysis Results -->
               {#if gapResults[feature.id]}
                 {@const result = gapResults[feature.id]}
                 <div class="rounded-lg bg-cyan-900/20 border border-cyan-800/40 px-3 py-2 text-xs text-cyan-300">
+                  {result.message}
+                  <span class="text-gray-500 ml-2">Issue: {result.issue_id.slice(0, 8)}</span>
+                </div>
+              {/if}
+
+              <!-- Plan Generation Results -->
+              {#if planResults[feature.id]}
+                {@const result = planResults[feature.id]}
+                <div class="rounded-lg bg-purple-900/20 border border-purple-800/40 px-3 py-2 text-xs text-purple-300">
                   {result.message}
                   <span class="text-gray-500 ml-2">Issue: {result.issue_id.slice(0, 8)}</span>
                 </div>

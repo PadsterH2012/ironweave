@@ -1280,6 +1280,8 @@ export const features = {
   summary: () => get<FeatureSummary[]>('/features/summary'),
   gaps: (projectId: string, featureId: string) =>
     post<{ issue_id: string; message: string }>(`/projects/${projectId}/features/${featureId}/gaps`, {}),
+  plan: (projectId: string, featureId: string) =>
+    post<{ issue_id: string; message: string }>(`/projects/${projectId}/features/${featureId}/plan`, {}),
 };
 
 export const featureTasks = {

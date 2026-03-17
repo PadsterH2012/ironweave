@@ -416,6 +416,71 @@ X found, Y partial, Z not found out of N total"#,
     }))
 }
 
+/// Generate an implementation plan by dispatching an Architect agent
+pub async fn generate_plan(
+    Path((pid, fid)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<Json<GapAnalysisTriggered>, StatusCode> {
+    let conn = state.conn()?;
+    let feature = Feature::get_by_id(&conn, &fid).map_err(|_| StatusCode::NOT_FOUND)?;
+    let tasks = FeatureTask::list_by_feature(&conn, &fid).unwrap_or_default();
+    let project = crate::models::project::Project::get_by_id(&conn, &pid).map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let task_list = tasks.iter()
+        .enumerate()
+        .map(|(i, t)| format!("{}. {}", i + 1, t.title))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let prd_section = feature.prd_content.as_deref().unwrap_or("No PRD content available.");
+
+    let prompt = format!(
+        "You are generating a detailed implementation plan for the feature: \"{}\"\n\n\
+        ## Feature Description\n{}\n\n\
+        ## PRD Content\n{}\n\n\
+        ## Current High-Level Tasks\n{}\n\n\
+        ## Your Job\n\n\
+        Read the PRD and current task list. Then generate a detailed implementation plan that:\n\
+        1. Breaks each high-level task into specific engineering steps\n\
+        2. Lists exact file paths to create or modify\n\
+        3. Specifies the order tasks should be done (dependencies)\n\
+        4. Includes what tests to write\n\
+        5. Each task should be small enough for one agent to complete\n\n\
+        When done, update this issue with your plan as the summary:\n\
+        curl -sk -X PATCH ${{IRONWEAVE_API}}/api/projects/{}/issues/{{{{ISSUE_ID}}}} \\\n  \
+        -H 'Content-Type: application/json' \\\n  \
+        -d '{{\"status\": \"closed\", \"summary\": \"<your implementation plan in markdown>\"}}'",
+        feature.title, feature.description, prd_section, task_list, pid
+    );
+
+    let issue = Issue::create(&conn, &CreateIssue {
+        project_id: pid.clone(),
+        issue_type: Some("task".into()),
+        title: format!("Implementation Plan: {}", feature.title),
+        description: Some(prompt.clone()),
+        priority: Some(2),
+        role: Some("Architect".into()),
+        needs_intake: Some(0),
+        scope_mode: Some("auto".into()),
+        depends_on: None,
+        workflow_instance_id: None,
+        stage_id: None,
+        parent_id: None,
+    }).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Fix the description to include the real issue ID for the curl command
+    let fixed_desc = prompt.replace("{ISSUE_ID}", &issue.id);
+    let _ = Issue::update(&conn, &issue.id, &crate::models::issue::UpdateIssue {
+        description: Some(fixed_desc),
+        ..Default::default()
+    });
+
+    Ok(Json(GapAnalysisTriggered {
+        issue_id: issue.id,
+        message: format!("Planning agent dispatched for '{}'", feature.title),
+    }))
+}
+
 /// Implement a task: create an issue from the task and link them
 pub async fn implement_task(
     Path((_fid, id)): Path<(String, String)>,
@@ -428,10 +493,38 @@ pub async fn implement_task(
     let feature = Feature::get_by_id(&conn, &task.feature_id)
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
+    // Build rich description with full feature context
+    let mut desc_parts = Vec::new();
+    desc_parts.push(format!("## Feature: {}\n\n{}", feature.title, feature.description));
+
+    if let Some(ref prd) = feature.prd_content {
+        let truncated = if prd.len() > 2000 { &prd[..2000] } else { prd.as_str() };
+        desc_parts.push(format!("\n## PRD Context\n{}", truncated));
+    }
+
+    // Show all tasks with status
+    let all_tasks = FeatureTask::list_by_feature(&conn, &task.feature_id)
+        .unwrap_or_default();
+    let mut task_list = String::from("\n## All Tasks\n");
+    for t in &all_tasks {
+        let icon = match t.status.as_str() {
+            "done" => "\u{2713}",
+            "skipped" => "\u{2298}",
+            _ => if t.id == id { "\u{2192}" } else { "\u{25CB}" },
+        };
+        let current = if t.id == id { " \u{2190} **YOUR TASK**" } else { "" };
+        task_list.push_str(&format!("- {} {}{}\n", icon, t.title, current));
+    }
+    desc_parts.push(task_list);
+
+    desc_parts.push(format!("\n## Your Task\n**{}**\n\nImplement this task as part of the feature above. Check the task list to understand what's already done and what depends on your work.", task.title));
+
+    let rich_description = desc_parts.join("\n");
+
     let issue = Issue::create(&conn, &CreateIssue {
         project_id: feature.project_id.clone(),
         title: task.title.clone(),
-        description: Some(format!("From feature: {}\n\n{}", feature.title, feature.description)),
+        description: Some(rich_description),
         issue_type: Some("task".into()),
         priority: Some(feature.priority),
         depends_on: None,
