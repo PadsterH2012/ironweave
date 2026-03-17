@@ -60,6 +60,7 @@
   let loomEntries: LoomEntry[] = $state([]);
   let dispatchStatus: ProjectDispatchStatus | null = $state(null);
   let togglingDispatch: boolean = $state(false);
+  let pendingQuestions: number = $state(0);
 
   let showIntakeChat: boolean = $state(false);
 
@@ -111,7 +112,7 @@
     { key: 'issues', label: 'Issues' },
     { key: 'workflows', label: 'Workflows' },
     { key: 'merge-queue', label: 'Merge Queue' },
-    { key: 'loom', label: 'Loom' },
+    { key: 'loom', label: pendingQuestions > 0 ? `Loom (${pendingQuestions})` : 'Loom' },
     { key: 'files', label: 'Files' },
     ...(project?.mount_id ? [{ key: 'history', label: 'History' }] : []),
     { key: 'prompts', label: 'Prompts' },
@@ -356,6 +357,7 @@
     const pid = params.id;
     if (pid) {
       fetchProject().then(() => { autoSync(); loadAppStatus(); fetchDispatchStatus(); });
+      loom.questions(pid).then(qs => pendingQuestions = qs.length).catch(() => {});
       fetchTeams().then(() => {
         // Fetch slots and statuses for active teams
         for (const team of teamList) {

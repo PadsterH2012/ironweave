@@ -1,5 +1,30 @@
 <script lang="ts">
   import { loom, type LoomEntry } from '../api';
+
+  let replyingTo: string | null = $state(null);
+  let replyContent: string = $state('');
+  let submittingReply: boolean = $state(false);
+
+  async function submitReply(questionEntry: LoomEntry) {
+    if (!replyContent.trim()) return;
+    submittingReply = true;
+    try {
+      await loom.answer({
+        question_id: questionEntry.id,
+        content: replyContent,
+        team_id: questionEntry.team_id,
+        project_id: questionEntry.project_id,
+      });
+      replyContent = '';
+      replyingTo = null;
+      // Re-poll to show the new answer
+      poll();
+    } catch (e) {
+      console.error('Failed to post answer:', e);
+    } finally {
+      submittingReply = false;
+    }
+  }
   import { timeAgo } from '../utils';
 
   interface Props {
@@ -28,6 +53,8 @@
       case 'delegation': return '\u2192';
       case 'escalation': return '\u2191';
       case 'completion': return '\u2713';
+      case 'question': return '\u2753';
+      case 'answer': return '\uD83D\uDCAC';
       default: return '\u00b7';
     }
   }
@@ -40,6 +67,8 @@
       case 'delegation': return 'text-purple-400';
       case 'escalation': return 'text-red-400';
       case 'completion': return 'text-green-400';
+      case 'question': return 'text-orange-400';
+      case 'answer': return 'text-teal-400';
       default: return 'text-gray-400';
     }
   }
@@ -159,6 +188,43 @@
               </div>
               {#if entry.workflow_instance_id}
                 <div>Workflow: <span class="text-gray-400 font-mono">{entry.workflow_instance_id.slice(0, 8)}</span></div>
+              {/if}
+            </div>
+          {/if}
+
+          {#if entry.entry_type === 'question'}
+            <div class="mt-1 ml-6">
+              {#if replyingTo === entry.id}
+                <div class="flex gap-2 mt-1" onclick={(e) => e.stopPropagation()}>
+                  <input
+                    type="text"
+                    bind:value={replyContent}
+                    placeholder="Type your answer..."
+                    class="flex-1 text-xs bg-gray-900 border border-gray-700 rounded px-2 py-1 text-gray-200 focus:border-orange-500 focus:outline-none"
+                    onkeydown={(e) => { if (e.key === 'Enter') submitReply(entry); }}
+                    onclick={(e) => e.stopPropagation()}
+                  />
+                  <button
+                    onclick={(e) => { e.stopPropagation(); submitReply(entry); }}
+                    disabled={submittingReply || !replyContent.trim()}
+                    class="text-xs px-2 py-1 rounded bg-teal-600 hover:bg-teal-500 text-white disabled:opacity-50"
+                  >
+                    Reply
+                  </button>
+                  <button
+                    onclick={(e) => { e.stopPropagation(); replyingTo = null; replyContent = ''; }}
+                    class="text-xs px-2 py-1 rounded bg-gray-700 text-gray-300"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              {:else}
+                <button
+                  onclick={(e) => { e.stopPropagation(); replyingTo = entry.id; }}
+                  class="text-[10px] text-orange-400 hover:text-orange-300"
+                >
+                  Reply to this question
+                </button>
               {/if}
             </div>
           {/if}

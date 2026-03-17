@@ -813,6 +813,9 @@ export const loom = {
   recent: (limit = 50) => get<LoomEntry[]>(`/loom?limit=${limit}`),
   byProject: (projectId: string, limit = 50) => get<LoomEntry[]>(`/projects/${projectId}/loom?limit=${limit}`),
   byTeam: (teamId: string, limit = 50) => get<LoomEntry[]>(`/teams/${teamId}/loom?limit=${limit}`),
+  questions: (projectId: string) => get<LoomEntry[]>(`/projects/${projectId}/loom/questions`),
+  answer: (data: { question_id: string; content: string; team_id: string; project_id: string }) =>
+    post<LoomEntry>('/loom/answer', data),
 };
 
 // ── Swarm status ─────────────────────────────────────────────────

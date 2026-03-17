@@ -225,6 +225,8 @@ async fn main() {
         // Runtimes
         .route("/api/runtimes", get(api::runtimes::list))
         // Loom
+        .route("/api/projects/{pid}/loom/questions", get(api::loom::pending_questions))
+        .route("/api/loom/answer", post(api::loom::post_answer))
         .route("/api/projects/{pid}/loom", get(api::loom::list_by_project))
         .route("/api/teams/{tid}/loom", get(api::loom::list_by_team))
         .route("/api/loom", get(api::loom::list_recent).post(api::loom::create))

@@ -810,6 +810,38 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
     }
 
+    // ── Add question + answer entry types to loom ────────────────────
+    let needs_loom_migration = {
+        let sql: String = conn.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='loom_entries'",
+            [], |row| row.get(0)
+        ).unwrap_or_default();
+        !sql.contains("question")
+    };
+    if needs_loom_migration {
+        conn.execute_batch("PRAGMA foreign_keys=OFF;")?;
+        conn.execute_batch("
+            DROP TABLE IF EXISTS loom_entries_new;
+            CREATE TABLE loom_entries_new (
+                id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                agent_id TEXT,
+                team_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                workflow_instance_id TEXT,
+                entry_type TEXT NOT NULL
+                    CHECK(entry_type IN ('status', 'finding', 'warning', 'delegation', 'escalation', 'completion', 'question', 'answer')),
+                content TEXT NOT NULL
+            );
+            INSERT INTO loom_entries_new SELECT * FROM loom_entries;
+            DROP TABLE loom_entries;
+            ALTER TABLE loom_entries_new RENAME TO loom_entries;
+            CREATE INDEX IF NOT EXISTS idx_loom_entries_project ON loom_entries(project_id);
+            CREATE INDEX IF NOT EXISTS idx_loom_entries_team ON loom_entries(team_id);
+        ")?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+    }
+
     Ok(())
 }
 
