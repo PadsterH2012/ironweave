@@ -2023,6 +2023,25 @@ impl OrchestratorRunner {
             agent_id = session.id,
         ));
 
+        // Agent chat — question/answer via Loom
+        prompt_parts.push(format!(
+            "\n## Asking Questions\n\
+            If you are unsure about something or need clarification, DO NOT GUESS.\n\
+            Post a question to the Loom and wait for an answer:\n\n\
+            curl -sk -X POST ${{IRONWEAVE_API}}/api/loom \\\n  \
+            -H 'Content-Type: application/json' \\\n  \
+            -d '{{\"team_id\": \"{team_id}\", \"project_id\": \"{project_id}\", \"agent_id\": \"{agent_id}\", \
+            \"entry_type\": \"question\", \"content\": \"<your question here>\"}}'\n\n\
+            Then poll for an answer (check every 30 seconds, up to 5 minutes):\n\
+            curl -sk ${{IRONWEAVE_API}}/api/projects/{project_id}/loom/questions\n\n\
+            Look for an entry with entry_type \"answer\" that references your question.\n\
+            Answer entries have content starting with \"[Re: <your-question-id>]\".\n\n\
+            Only ask questions when genuinely blocked — for minor decisions, use your best judgement and note it.",
+            team_id = team.id,
+            project_id = team.project_id,
+            agent_id = session.id,
+        ));
+
         // Knowledge base query instructions
         prompt_parts.push(format!(
             "\n## Knowledge Base\n\
