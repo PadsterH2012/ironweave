@@ -753,6 +753,54 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_project_documents_unique ON project_documents(project_id, doc_type);
     ")?;
 
+    // ── Add backlog + on_hold statuses to issues ─────────────────────
+    // Check if the constraint already includes 'backlog'
+    let needs_issue_status_migration = {
+        let sql: String = conn.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='issues'",
+            [], |row| row.get(0)
+        ).unwrap_or_default();
+        !sql.contains("backlog")
+    };
+    if needs_issue_status_migration {
+        conn.execute_batch("PRAGMA foreign_keys=OFF;")?;
+        conn.execute_batch("
+            DROP TABLE IF EXISTS issues_new;
+            CREATE TABLE issues_new (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id),
+                type TEXT NOT NULL DEFAULT 'task'
+                    CHECK(type IN ('bug', 'feature', 'task')),
+                title TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'open'
+                    CHECK(status IN ('open', 'in_progress', 'review', 'closed', 'backlog', 'on_hold')),
+                priority INTEGER NOT NULL DEFAULT 5,
+                claimed_by TEXT REFERENCES agent_sessions(id),
+                claimed_at TEXT,
+                depends_on TEXT NOT NULL DEFAULT '[]',
+                summary TEXT,
+                workflow_instance_id TEXT,
+                stage_id TEXT,
+                role TEXT,
+                parent_id TEXT,
+                needs_intake INTEGER NOT NULL DEFAULT 0,
+                scope_mode TEXT NOT NULL DEFAULT 'auto',
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            INSERT INTO issues_new SELECT * FROM issues;
+            DROP TABLE issues;
+            ALTER TABLE issues_new RENAME TO issues;
+            CREATE INDEX IF NOT EXISTS idx_issues_project ON issues(project_id);
+            CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
+            CREATE INDEX IF NOT EXISTS idx_issues_parent ON issues(parent_id);
+            CREATE INDEX IF NOT EXISTS idx_issues_needs_intake ON issues(needs_intake);
+        ")?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+    }
+
     Ok(())
 }
 

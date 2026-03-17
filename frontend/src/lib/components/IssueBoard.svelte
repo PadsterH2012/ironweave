@@ -30,12 +30,23 @@
   // Expand/collapse state for parent issues
   let expandedParents: Set<string> = $state(new Set());
 
-  const columns = [
+  const allColumns = [
+    { key: 'backlog', label: 'Backlog' },
     { key: 'open', label: 'Open' },
     { key: 'in_progress', label: 'In Progress' },
+    { key: 'on_hold', label: 'On Hold' },
     { key: 'review', label: 'Review' },
     { key: 'closed', label: 'Closed' },
   ];
+
+  let hiddenColumns: Record<string, boolean> = $state({
+    'backlog': false,
+    'on_hold': false,
+    'closed': false,
+  });
+
+  let columns = $derived(allColumns.filter(c => !hiddenColumns[c.key]));
+  let showColumnSettings: boolean = $state(false);
 
   // Only show top-level issues (no parent_id) in columns
   function issuesByStatus(status: string): Issue[] {
@@ -220,8 +231,35 @@
     </div>
   {/if}
 
+  <!-- Column visibility toggle -->
+  <div class="flex items-center justify-between mb-3">
+    <div class="flex items-center gap-2">
+      <button
+        onclick={() => showColumnSettings = !showColumnSettings}
+        class="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+      >
+        Columns ▾
+      </button>
+      {#if showColumnSettings}
+        <div class="flex items-center gap-3 text-xs">
+          {#each allColumns as col}
+            <label class="flex items-center gap-1 text-gray-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!hiddenColumns[col.key]}
+                onchange={() => { hiddenColumns[col.key] = !hiddenColumns[col.key]; hiddenColumns = {...hiddenColumns}; }}
+                class="accent-purple-500"
+              />
+              {col.label}
+            </label>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  </div>
+
   <!-- Kanban board -->
-  <div class="grid grid-cols-4 gap-4 min-h-[400px]">
+  <div class="grid gap-4 min-h-[400px]" style="grid-template-columns: repeat({columns.length}, minmax(0, 1fr));">
     {#each columns as col}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
@@ -239,7 +277,7 @@
 
         <!-- Cards -->
         <div class="flex-1 p-2 space-y-2 overflow-y-auto">
-          {#if col.key === 'open'}
+          {#if col.key === 'open' || col.key === 'backlog'}
             <button
               onclick={() => showCreateForm = !showCreateForm}
               class="w-full px-3 py-2 text-xs font-medium rounded-lg border border-dashed border-gray-700 text-gray-400 hover:border-purple-500 hover:text-purple-400 transition-colors"
