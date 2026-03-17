@@ -3,7 +3,7 @@
 > **Living document** — update when features are added, modified, or removed.
 > Use this to verify nothing has been accidentally deleted during development.
 
-Last updated: 2026-03-16
+Last updated: 2026-03-17
 
 ---
 
