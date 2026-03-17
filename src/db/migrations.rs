@@ -790,7 +790,13 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
-            INSERT INTO issues_new SELECT * FROM issues;
+            INSERT INTO issues_new SELECT
+                id, project_id, type, title, description, status, priority,
+                claimed_by, claimed_at, depends_on, summary,
+                workflow_instance_id, stage_id, role, parent_id,
+                COALESCE(needs_intake, 0), COALESCE(scope_mode, 'auto'),
+                COALESCE(retry_count, 0), created_at, updated_at
+            FROM issues;
             DROP TABLE issues;
             ALTER TABLE issues_new RENAME TO issues;
             CREATE INDEX IF NOT EXISTS idx_issues_project ON issues(project_id);
