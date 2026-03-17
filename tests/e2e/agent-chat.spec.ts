@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const BASE = 'http://localhost:3001/api';
+const BASE = (process.env.BASE_URL || 'https://hl-ironweave-dev.techpad.uk') + '/api';
 
 // Helper: get or create a project + team for testing
 async function getTestProjectAndTeam(request: any) {
