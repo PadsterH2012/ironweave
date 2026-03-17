@@ -1859,25 +1859,33 @@ impl OrchestratorRunner {
             (project.directory, project.name)
         };
 
-        // Create git worktree for isolation
-        let task_hash = &issue.id[..8];
-        let default_branch = WorktreeManager::detect_default_branch(std::path::Path::new(&project_dir))
-            .unwrap_or_else(|| "main".to_string());
-        // Sanitize role for use in git branch names (no spaces or special chars)
-        let safe_role = slot.role.to_lowercase().replace(' ', "-").replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "");
-        let (worktree_path, branch_name) = match self.worktree_manager.create_worktree(
-            std::path::Path::new(&project_dir),
-            &safe_role,
-            task_hash,
-            &default_branch,
-        ) {
-            Ok((path, branch)) => (Some(path), Some(branch)),
-            Err(e) => {
-                tracing::warn!(
-                    issue = %issue.id,
-                    "Failed to create worktree, falling back to main dir: {}", e
-                );
-                (None, None)
+        // Read-only roles skip worktree creation — they work directly in the project directory
+        const READ_ONLY_ROLES: &[&str] = &["gap analyst", "researcher", "documentor"];
+        let is_read_only = READ_ONLY_ROLES.contains(&slot.role.to_lowercase().as_str());
+
+        let (worktree_path, branch_name) = if is_read_only {
+            tracing::info!(role = %slot.role, issue = %issue.id, "Read-only role — skipping worktree");
+            (None, None)
+        } else {
+            // Create git worktree for isolation
+            let task_hash = &issue.id[..8];
+            let default_branch = WorktreeManager::detect_default_branch(std::path::Path::new(&project_dir))
+                .unwrap_or_else(|| "main".to_string());
+            let safe_role = slot.role.to_lowercase().replace(' ', "-").replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "");
+            match self.worktree_manager.create_worktree(
+                std::path::Path::new(&project_dir),
+                &safe_role,
+                task_hash,
+                &default_branch,
+            ) {
+                Ok((path, branch)) => (Some(path), Some(branch)),
+                Err(e) => {
+                    tracing::warn!(
+                        issue = %issue.id,
+                        "Failed to create worktree, falling back to main dir: {}", e
+                    );
+                    (None, None)
+                }
             }
         };
 
