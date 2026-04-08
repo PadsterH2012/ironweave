@@ -4,6 +4,7 @@
     type DispatchStatus,
     type DispatchSchedule,
   } from '../api';
+  import CronVisualizer from './CronVisualizer.svelte';
 
   let status: DispatchStatus | null = $state(null);
   let schedules: DispatchSchedule[] = $state([]);
@@ -11,6 +12,8 @@
   let loading = $state(false);
   let pauseReason = $state('');
   let error: string | null = $state(null);
+
+  let editingSchedule: DispatchSchedule | null = $state(null);
 
   let newCron = $state('');
   let newAction: 'pause' | 'resume' = $state('pause');
@@ -74,6 +77,15 @@
       await refresh();
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to delete schedule';
+    }
+  }
+
+  async function updateScheduleCron(id: string, cronExpression: string) {
+    try {
+      await dispatch.schedules.update(id, { cron_expression: cronExpression });
+      await refresh();
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to update schedule';
     }
   }
 
@@ -172,6 +184,11 @@
                 {/if}
               </div>
               <button
+                onclick={() => { editingSchedule = s; }}
+                class="text-xs text-gray-600 hover:text-gray-300 transition-colors"
+                title="Edit schedule"
+              >⚙</button>
+              <button
                 onclick={() => removeSchedule(s.id)}
                 class="text-xs text-gray-600 hover:text-red-400 transition-colors"
                 title="Delete schedule"
@@ -224,3 +241,15 @@
     </div>
   {/if}
 </div>
+
+{#if editingSchedule}
+  {@const s = editingSchedule}
+  <CronVisualizer
+    schedule={s}
+    onClose={() => { editingSchedule = null; }}
+    onSave={async (cron) => {
+      await updateScheduleCron(s.id, cron);
+      editingSchedule = null;
+    }}
+  />
+{/if}
